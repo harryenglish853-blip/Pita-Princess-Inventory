@@ -46,3 +46,19 @@ export async function postCount(id: string, acknowledge: boolean): Promise<Actio
   await supabase.rpc("refresh_stock_alerts", { p_location: (await requireContext()).location.id });
   return ok(`Inventory posted: ${r.lines} items, variance ${r.variance_value < 0 ? "-" : ""}$${Math.abs(r.variance_value).toFixed(2)}`);
 }
+
+export async function saveAssignments(_: ActionState, fd: FormData): Promise<ActionState> {
+  const byUser = new Map<string, (string | null)[]>();
+  for (const v of fd.getAll("a").map(String)) {
+    const [user, area] = v.split("|");
+    if (!user || !area) continue;
+    byUser.set(user, [...(byUser.get(user) ?? []), area === "none" ? null : area]);
+  }
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_count_assignments", {
+    p_session: str(fd, "session_id"),
+    p_assignments: [...byUser].map(([user_id, storage_location_ids]) => ({ user_id, storage_location_ids })),
+  });
+  if (error) return fail(error);
+  return ok("Assignments saved");
+}

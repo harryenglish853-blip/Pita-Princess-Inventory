@@ -7,17 +7,19 @@ import { Badge, Card, Field, Input, LinkButton, PageHeader, Select, StatusBadge 
 import { money, dateFmt } from "@/lib/format";
 import { VendorFields } from "../vendor-form";
 import { saveGuideItem, saveVendor } from "../actions";
+import { StoreVendorSettings } from "../store-settings";
 
 export default async function VendorPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const ctx = await requirePermission("orders.view");
   const supabase = await createClient();
-  const [{ data: vendor }, { data: guide }, { data: products }, { data: options }, { data: orders }] = await Promise.all([
+  const [{ data: vendor }, { data: guide }, { data: products }, { data: options }, { data: orders }, { data: storeOverride }] = await Promise.all([
     supabase.from("vendors").select("*").eq("id", id).single(),
     supabase.from("vendor_products").select("*, product:products(id, name, product_number, inventory_unit_id), unit:units(code)").eq("vendor_id", id).order("guide_sort").order("vendor_item_number"),
     supabase.from("products").select("id, name, product_number").eq("active", true).order("name"),
     supabase.from("product_unit_options").select("product_id, unit_id, unit_code, factor, is_inventory_unit, use_for_purchase, priority"),
     supabase.from("purchase_orders").select("id, po_number, status, expected_delivery_date").eq("vendor_id", id).eq("location_id", ctx.location.id).order("created_at", { ascending: false }).limit(10),
+    supabase.from("location_vendors").select("delivery_days, lead_time_days, order_cutoff, account_number, active, notes").eq("vendor_id", id).eq("location_id", ctx.location.id).maybeSingle(),
   ]);
   if (!vendor) notFound();
   const edit = canOrg(ctx, "vendors.edit");
@@ -96,6 +98,8 @@ export default async function VendorPage({ params }: { params: Promise<{ id: str
           </div>
         </Card>
         <div className="space-y-4">
+          <StoreVendorSettings vendorId={id} storeLabel={`#${ctx.location.code} ${ctx.location.name}`} company={vendor}
+            override={storeOverride} editable={can(ctx, "products.local_edit")} />
           <Card title="Recent orders">
             <ul className="space-y-1 text-sm">
               {(orders ?? []).map((o) => (

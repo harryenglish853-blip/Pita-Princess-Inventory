@@ -15,7 +15,8 @@ export default async function PurchasingPage() {
   const [{ data: pos }, { data: vendors }, { data: lines }] = await Promise.all([
     supabase.from("purchase_orders").select("id, po_number, status, order_date, expected_delivery_date, vendor_id, vendor:vendors(name), creator:profiles!purchase_orders_created_by_fkey(full_name)")
       .eq("location_id", ctx.location.id).order("created_at", { ascending: false }).limit(300),
-    supabase.from("vendors").select("id, name, delivery_days, order_cutoff, minimum_order").eq("active", true).order("name"),
+    // This store's effective schedule (store overrides over company settings); vendors the store doesn't use are hidden
+    supabase.from("location_vendor_settings").select("id:vendor_id, name:vendor_name, delivery_days, order_cutoff, minimum_order").eq("location_id", ctx.location.id).eq("active", true).order("vendor_name"),
     supabase.from("purchase_order_items").select("po_id, extended_price, suggested_qty, order_qty"),
   ]);
   const today = todayIn(ctx.location.timezone);

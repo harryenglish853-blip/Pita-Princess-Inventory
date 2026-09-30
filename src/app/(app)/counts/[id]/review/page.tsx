@@ -69,6 +69,7 @@ export default async function ReviewPage({ params, searchParams }: { params: Pro
         actions={
           <>
             {!posted && session.status !== "cancelled" ? <LinkButton href={`/counts/${id}`}>Open count sheet</LinkButton> : null}
+            {canReviewPerm && !posted && session.status !== "cancelled" ? <LinkButton href={`/counts/${id}/assign`}>Assign counters</LinkButton> : null}
             {canReviewPerm && ["awaiting_review", "reviewed"].includes(session.status) ? <ActionButton action={reopenCount.bind(null, id)} confirm="Reopen the count so counters can keep editing?">Reopen</ActionButton> : null}
             {canReviewPerm && session.status === "awaiting_review" ? <ActionButton action={markReviewed.bind(null, id)} disabled={!!conflicts?.length || outstanding > 0}>Mark reviewed</ActionButton> : null}
             {canReviewPerm && !posted && session.status !== "cancelled" ? <ActionButton action={cancelCount.bind(null, id)} variant="ghost" prompt="Why is this count being cancelled?" confirm="Cancel this count? Entries are kept for the audit trail but nothing is posted." confirmLabel="Cancel count">Cancel count</ActionButton> : null}

@@ -23,7 +23,10 @@ type Line = {
   units: Unit[]; barcodes: { barcode: string; unit_id: string | null }[];
 };
 type Session = { id: string; name: string; count_number: string; status: string; count_type: string; count_at: string; location_name: string; location_id: string };
-type Sheet = { session: Session; storages: { id: string; name: string }[]; lines: Line[]; entries: ServerEntry[]; server_time: string };
+type Sheet = {
+  session: Session; storages: { id: string; name: string }[]; lines: Line[]; entries: ServerEntry[]; server_time: string;
+  assignments?: { user_id: string; name: string; storage_location_id: string | null }[]; me?: string | null;
+};
 type ServerEntry = {
   id: string; product_id: string; storage_location_id: string | null; quantity: number; breakdown: { unit_id: string; qty: number }[];
   revision: number; has_conflict: boolean; recount_requested: boolean; counted_by_name: string | null; counted_at: string; method: string; voice_transcript: string | null;
@@ -62,6 +65,7 @@ export function CountScreen({ sessionId, userName, canReview, canMapBarcode }: {
   const [submitting, setSubmitting] = useState(false);
   const recognition = useRef<{ stop: () => void } | null>(null);
   const firstInput = useRef<HTMLInputElement | null>(null);
+  const areaChosen = useRef(false);
 
   // ------------------------------------------------------------ loading (device first, then network)
   const loadLocalEntries = useCallback(async () => {
@@ -113,6 +117,19 @@ export function CountScreen({ sessionId, userName, canReview, canMapBarcode }: {
   }, [sessionId, loadLocalEntries, refreshFromServer]);
 
   // ------------------------------------------------------------ derived
+  // Areas the reviewer assigned to this counter; the sheet opens on the first one.
+  const myAreas = useMemo(() => new Set((sheet?.assignments ?? []).filter((a) => a.user_id === sheet?.me).map((a) => a.storage_location_id ?? "none")), [sheet]);
+  const assignees = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const a of sheet?.assignments ?? []) m.set(a.storage_location_id ?? "none", [...(m.get(a.storage_location_id ?? "none") ?? []), a.name]);
+    return m;
+  }, [sheet]);
+  useEffect(() => {
+    if (areaChosen.current || !sheet) return;
+    areaChosen.current = true;
+    const first = [...sheet.storages.map((s) => s.id), "none"].find((id) => myAreas.has(id));
+    if (first) setArea(first);
+  }, [sheet, myAreas]);
   const status = sheet?.session.status ?? "in_progress";
   const locked = ["posted", "cancelled", "reviewed"].includes(status);
   const reviewOnly = status === "awaiting_review";
@@ -347,9 +364,11 @@ export function CountScreen({ sessionId, userName, canReview, canMapBarcode }: {
       {/* area chips + filters */}
       <div className="-mx-3 mb-3 flex gap-1.5 overflow-x-auto px-3 pb-1">
         {[{ id: "all", name: "All areas" }, ...areas].map((a) => (
-          <button key={a.id} type="button" onClick={() => { void (current && commit(current)); setArea(a.id); setIdx(0); }}
-            className={cx("whitespace-nowrap rounded-full border px-3 py-1.5 text-sm", area === a.id ? "border-brand bg-brand text-white" : "border-border bg-surface")}>
-            {a.name}
+          <button key={a.id} type="button" onClick={() => { areaChosen.current = true; void (current && commit(current)); setArea(a.id); setIdx(0); }}
+            title={assignees.get(a.id)?.length ? `Assigned: ${assignees.get(a.id)!.join(", ")}` : undefined}
+            aria-pressed={area === a.id} data-mine={myAreas.has(a.id) || undefined}
+            className={cx("whitespace-nowrap rounded-full border px-3 py-1.5 text-sm", area === a.id ? "border-brand bg-brand text-white" : myAreas.has(a.id) ? "border-brand bg-brand-soft" : "border-border bg-surface")}>
+            {a.name}{myAreas.has(a.id) ? " · yours" : ""}
           </button>
         ))}
       </div>

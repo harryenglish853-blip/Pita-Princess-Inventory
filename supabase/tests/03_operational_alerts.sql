@@ -26,9 +26,17 @@ begin
   perform public.refresh_operational_alerts(v_loc);
   perform tests.assert(not exists (select 1 from public.alerts where location_id = v_loc and dedupe_key = 'late:' || v_po and status <> 'resolved'), 'late delivery alert resolves when cleared');
 
-  -- (cleanup)
+  -- Signed-in users cannot run the all-locations system job
+  begin
+    perform app.refresh_all_alerts();
+    perform tests.assert(false, 'system job blocked for users');
+  exception when insufficient_privilege then
+    perform tests.assert(true, 'system job refuses signed-in users');
+  end;
   perform tests.logout();
-  perform tests.assert(true, 'done');
+
+  -- The scheduled job (no signed-in user) refreshes every active location
+  perform tests.assert(app.refresh_all_alerts() = (select count(*) from public.locations where active), 'scheduled refresh covers every active location');
   raise notice 'ALL OPERATIONAL ALERT TESTS PASSED';
 end $$;
 rollback;

@@ -19,11 +19,15 @@ export default async function CountsPage() {
   ]);
   const ids = (sessions ?? []).map((s) => s.id);
   const openIds = (sessions ?? []).filter((s) => !["posted", "cancelled"].includes(s.status)).map((s) => s.id);
-  const [{ data: entries }, { data: items }, { data: posted }] = await Promise.all([
+  const [{ data: entries }, { data: items }, { data: posted }, { data: assignments }] = await Promise.all([
     supabase.from("count_entries").select("session_id").in("session_id", openIds.length ? openIds : ["00000000-0000-0000-0000-000000000000"]),
     supabase.from("count_session_items").select("session_id, product_id").in("session_id", openIds.length ? openIds : ["00000000-0000-0000-0000-000000000000"]),
     supabase.from("count_posting_lines").select("session_id, variance_value").in("session_id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"]),
+    supabase.from("count_assignments").select("session_id, user_id, storage_location_id").in("session_id", openIds.length ? openIds : ["00000000-0000-0000-0000-000000000000"]),
   ]);
+  const storageNames = new Map((storages ?? []).map((s) => [s.id, s.name]));
+  const myAreas = (id: string) => (assignments ?? []).filter((a) => a.session_id === id && a.user_id === ctx.user.id)
+    .map((a) => (a.storage_location_id ? storageNames.get(a.storage_location_id) ?? "Area" : "Unassigned items"));
   const open = (sessions ?? []).filter((s) => !["posted", "cancelled"].includes(s.status));
   const done = (sessions ?? []).filter((s) => ["posted", "cancelled"].includes(s.status));
   const progress = (id: string) => {
@@ -55,9 +59,11 @@ export default async function CountsPage() {
                   <div className="h-full bg-brand" style={{ width: `${p.n ? Math.min(100, (p.c / p.n) * 100) : 0}%` }} />
                 </div>
                 <div className="mt-1 text-xs text-muted">{p.c} lines counted · {p.n} items on sheet</div>
+                {myAreas(s.id).length ? <div className="mt-2 text-sm"><span className="font-semibold text-brand">Your areas:</span> {myAreas(s.id).join(", ")}</div> : null}
                 <div className="mt-3 flex flex-wrap gap-2">
                   {["not_started", "in_progress", "awaiting_review"].includes(s.status) ? <LinkButton href={`/counts/${s.id}`} variant="primary" size="sm">{s.status === "not_started" ? "Start counting" : "Continue count"}</LinkButton> : null}
                   {can(ctx, "inventory.review") ? <LinkButton href={`/counts/${s.id}/review`} size="sm">Review</LinkButton> : null}
+                  {can(ctx, "inventory.review") ? <LinkButton href={`/counts/${s.id}/assign`} size="sm" variant="ghost">Assign</LinkButton> : null}
                   <DownloadForOffline sessionId={s.id} />
                 </div>
               </Card>

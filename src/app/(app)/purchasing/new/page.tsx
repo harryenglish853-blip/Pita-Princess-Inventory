@@ -13,7 +13,7 @@ export default async function NewOrderPage({ searchParams }: { searchParams: Pro
   const ctx = await requirePermission("orders.create");
   if (!sp.vendor) notFound();
   const supabase = await createClient();
-  const { data: vendor } = await supabase.from("vendors").select("id, name, minimum_order, order_cutoff, lead_time_days, delivery_days").eq("id", sp.vendor).single();
+  const { data: vendor } = await supabase.from("location_vendor_settings").select("id:vendor_id, name:vendor_name, minimum_order, order_cutoff, lead_time_days, delivery_days, account_number").eq("vendor_id", sp.vendor).eq("location_id", ctx.location.id).single();
   if (!vendor) notFound();
   const today = todayIn(ctx.location.timezone);
   const delivery = sp.delivery ?? nextDeliveryAfter(vendor.delivery_days ?? [], today);

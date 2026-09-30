@@ -49,3 +49,34 @@ export async function saveGuideItem(vendorId: string, id: string | null, _: Acti
     return ok("Order guide updated");
   } catch (e) { return fail(e as Error); }
 }
+
+/** Store-level overrides for a vendor. Blank fields fall back to the company setting. */
+export async function saveStoreVendor(vendorId: string, _: ActionState, fd: FormData): Promise<ActionState> {
+  try {
+    const ctx = await requireContext();
+    const supabase = await createClient();
+    const lead = optStr(fd, "lead_time_days");
+    if (lead !== null && !/^\d+$/.test(lead)) return fail({ message: "Lead time must be a whole number of days." });
+    const row = {
+      organization_id: ctx.organizationId, location_id: ctx.location.id, vendor_id: vendorId,
+      account_number: optStr(fd, "account_number"),
+      lead_time_days: lead === null ? null : Number(lead),
+      order_cutoff: optStr(fd, "order_cutoff"),
+      delivery_days: bool(fd, "override_days") ? fd.getAll("delivery_days").map((d) => Number(d)) : null,
+      active: bool(fd, "active"),
+      notes: optStr(fd, "notes"),
+    };
+    const { data, error } = await supabase.from("location_vendors").upsert(row, { onConflict: "location_id,vendor_id" }).select("id");
+    if (error) return fail(error);
+    if (!data?.length) return fail({ message: "You do not have permission to change this store's vendor settings." });
+    return ok(`Saved for #${ctx.location.code}`);
+  } catch (e) { return fail(e as Error); }
+}
+
+export async function resetStoreVendor(vendorId: string): Promise<ActionState> {
+  const ctx = await requireContext();
+  const supabase = await createClient();
+  const { error } = await supabase.from("location_vendors").delete().eq("location_id", ctx.location.id).eq("vendor_id", vendorId);
+  if (error) return fail(error);
+  return ok("Store now uses the company settings");
+}

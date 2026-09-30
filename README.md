@@ -51,9 +51,9 @@ scripts/local-stack/     Docker-free Supabase-compatible stack for dev/CI
 |---|---|---|
 | 1 | Dashboard | Inventory value, actual/theoretical food cost %, AvT variance, waste, sales, forecast, turns, stock alerts, deliveries, reconciliation, tasks, largest variances, price increases; corporate scorecard with region/district/market filters and best/worst stores |
 | 2–4 | Inventory, storage, shelf-to-sheet | Full item master, multiple storage areas per item, drag-and-drop walking order |
-| 5 | Physical counts | Daily/weekly/month-end/cycle/location/category/full; case + weight entry, calculator input, +/−, barcode (camera or scanner), voice with confidence and confirmation; **offline** with sync states; multiple counters with conflict detection and revision history |
+| 5 | Physical counts | Daily/weekly/month-end/cycle/location/category/full; case + weight entry, calculator input, +/−, barcode (camera or scanner), voice with confidence and confirmation; **offline** with sync states; multiple counters assigned by storage area, with conflict detection and revision history |
 | 6–7 | Book inventory & review | Begin + received ± transfers + produced − used − waste ± adjustments = book; variance qty/$/%; tolerance flags → recount; posting creates variance transactions and locks the count |
-| 8–9 | Vendors & order guides | Delivery days, cutoffs, minimums, contract prices, multi-vendor price comparison |
+| 8–9 | Vendors & order guides | Delivery days, cutoffs, minimums, contract prices, multi-vendor price comparison; per-store delivery days, lead time, cutoff and account number |
 | 10–12 | Forecasting, dynamic pars, suggested ordering | Same-weekday sales forecast × trend; day-of-week demand; NEED − HAVE with transparent explanations |
 | 13–19 | Purchase orders, receiving, reconciliation, lots, temperatures | Status workflow, short/over/substitution/rejected/damaged/catch weight/back order, storage put-away, invoice over/short with tolerance and override reason, recall search |
 | 16 | Invoice scanner | Photo/PDF → Claude structured extraction → side-by-side review → apply; never posts on its own |
@@ -126,7 +126,7 @@ npm run test:e2e    # Playwright: permissions, offline counting + reload with no
 
 - Deploy the database with `supabase db push` (migrations only — not the seed). Create the first user by signing up; onboarding creates the organization and makes them System Owner.
 - Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (server only) and optionally `ANTHROPIC_API_KEY` for invoice scanning.
-- Stock and operational alerts (late delivery, order not submitted, expiring lots, high waste, high count variance, unusual usage) refresh when the dashboard loads and after counts and POS imports. The refresh functions run as the signed-in user; a scheduled server-side refresh is on the roadmap.
+- Stock and operational alerts (late delivery, order not submitted, expiring lots, high waste, high count variance, unusual usage) refresh when the dashboard loads, after counts and POS imports, and every 30 minutes through `app.refresh_all_alerts()`. The migration schedules that with `pg_cron` when the extension is available (hosted Supabase); elsewhere, run `select app.refresh_all_alerts();` from any scheduler as the database owner.
 - POS: Toast and Square file exports work today; API adapters (Clover, MICROS, Aloha, Lightspeed) plug into `src/lib/pos/adapters.ts` and still import through the same `import_sales` function.
 - Offline: counts are stored in IndexedDB and synced in batches with idempotency keys; entries never leave the device queue until the server confirms them. Sign-out warns if anything is unsynced.
 

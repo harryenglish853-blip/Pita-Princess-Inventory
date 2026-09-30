@@ -14,6 +14,9 @@ export default async function EditOrderPage({ params, searchParams }: { params: 
   const supabase = await createClient();
   const { data: po } = await supabase.from("purchase_orders").select("*, vendor:vendors(id, name, minimum_order, order_cutoff, lead_time_days)").eq("id", id).single();
   if (!po) notFound();
+  // This store's cutoff and lead time (store overrides over company settings)
+  const { data: store } = await supabase.from("location_vendor_settings").select("order_cutoff, lead_time_days").eq("vendor_id", po.vendor_id).eq("location_id", po.location_id).single();
+  if (store) Object.assign(po.vendor as object, store);
   if (!["draft", "ready_to_submit"].includes(po.status)) redirect(`/purchasing/${id}`);
   const { data: items } = await supabase.from("purchase_order_items").select("vendor_product_id, order_qty").eq("po_id", id);
   const delivery = sp.delivery ?? po.expected_delivery_date;

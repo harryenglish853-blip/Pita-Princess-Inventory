@@ -21,6 +21,9 @@ export default async function PoPage({ params }: { params: Promise<{ id: string 
   ]);
   if (!po) notFound();
   const vendor = po.vendor as { id: string; name: string; ordering_email: string | null; account_number: string | null; minimum_order: number };
+  // The store may order on its own account number
+  const { data: store } = await supabase.from("location_vendor_settings").select("account_number").eq("vendor_id", vendor.id).eq("location_id", po.location_id).single();
+  if (store) vendor.account_number = store.account_number;
   const showCost = can(ctx, "reports.view_cost");
   const lines = items ?? [];
   const total = lines.reduce((s, l) => s + Number(l.extended_price), 0);
