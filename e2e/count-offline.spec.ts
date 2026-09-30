@@ -20,14 +20,17 @@ test("count keeps working offline, syncs when back online, and manager posts it"
   await expect(page.getByTestId("line-total")).toHaveText("48.5 LB");
   await card.getByRole("button", { name: /^Next/ }).click();
   await expect(page.getByTestId("count-progress")).toHaveText(/^1 \//);
+  await expect(page.getByTestId("current-item")).toHaveText("Ground Beef 80/20");
 
   // Walk-in cooler: no signal
   await counter.context.setOffline(true);
   await page.evaluate(() => window.dispatchEvent(new Event("offline")));
   await inputs.nth(0).fill("2");
   await card.getByRole("button", { name: /^Next/ }).click();
+  await expect(page.getByTestId("current-item")).toHaveText("Salmon Fillet, Atlantic");
   await inputs.nth(0).fill("1*20+3");  // calculator input
   await card.getByRole("button", { name: /^Next/ }).click();
+  await expect(page.getByTestId("count-progress")).toHaveText(/^3 \//);
   await expect(page.getByTestId("sync-status").first()).toHaveAttribute("data-state", "offline");
   await expect(page.getByTestId("sync-status").first()).toContainText("2");
 
