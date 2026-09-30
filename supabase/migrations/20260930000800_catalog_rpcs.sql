@@ -134,7 +134,7 @@ begin
   (select 'Count', c.id, c.name, concat_ws(' · ', c.count_number, c.status::text), '/counts/' || c.id || '/review'
    from public.count_sessions c where c.location_id = p_location and (c.count_number ilike '%' || v_q || '%' or c.name ilike '%' || v_q || '%') limit 5)
   union all
-  (select 'Lot', l.id, l.lot_number, concat_ws(' · ', pr.name, l.traceability_lot_code), '/reports/lots?q=' || l.lot_number
+  (select 'Lot', l.id, l.lot_number, concat_ws(' · ', pr.name, l.traceability_lot_code), '/reports?r=lots&q=' || l.lot_number
    from public.lots l join public.products pr on pr.id = l.product_id
    where l.organization_id = app.location_org(p_location) and (l.lot_number ilike '%' || v_q || '%' or l.traceability_lot_code ilike '%' || v_q || '%') limit 5)
   union all

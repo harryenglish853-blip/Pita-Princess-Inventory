@@ -10,6 +10,8 @@ export type SuggestionRow = {
 
 export async function loadSuggestions(locationId: string, vendorId: string, delivery: string, next: string | null, excludePo: string | null) {
   const supabase = await createClient();
+  // Dynamic pars are recalculated from the current forecast before suggesting.
+  await supabase.rpc("refresh_dynamic_pars", { p_location: locationId });
   const { data, error } = await supabase.rpc("suggest_order", {
     p_location: locationId, p_vendor: vendorId, p_delivery_date: delivery, p_next_delivery_date: next, p_exclude_po: excludePo,
   });
