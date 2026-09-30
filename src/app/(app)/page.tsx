@@ -111,16 +111,17 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
       {cost && (k.forecast_week as K[])?.some((f) => Number(f.net_sales) > 0) ? (
         <Card title="Sales forecast — next 7 days" className="mt-4" padded={false}>
-          <div className="grid grid-cols-7 divide-x divide-border text-center text-sm">
+          {/* Phone: one row per day. Wider screens: seven columns. */}
+          <div className="grid divide-y divide-border text-sm sm:grid-cols-7 sm:divide-x sm:divide-y-0 sm:text-center">
             {(k.forecast_week as K[]).map((f) => (
-              <div key={f.date} className="p-3">
+              <div key={f.date} className="flex items-baseline justify-between gap-3 px-4 py-2 sm:block sm:p-3">
                 <div className="text-xs text-muted">{new Date(`${f.date}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "numeric", day: "numeric" })}</div>
-                <div className="mt-1 font-semibold tabular-nums">{money(f.net_sales)}</div>
-                <div className="text-xs text-muted">{f.guest_count} guests</div>
+                <div className="ml-auto font-semibold tabular-nums sm:ml-0 sm:mt-1">{money(f.net_sales)}</div>
+                <div className="w-20 text-right text-xs text-muted sm:w-auto sm:text-center">{f.guest_count} guests</div>
               </div>
             ))}
           </div>
-          <p className="border-t border-border px-4 py-2 text-xs text-muted">{(k.forecast_week as K[])[0]?.method}. Suggested orders and dynamic pars use this forecast.</p>
+          <p className="border-t border-border px-4 py-2 text-xs text-muted">{(k.forecast_week as K[])[0]?.method}. {ordering ? "Suggested orders and dynamic pars use" : "Dynamic pars use"} this forecast.</p>
         </Card>
       ) : null}
 
