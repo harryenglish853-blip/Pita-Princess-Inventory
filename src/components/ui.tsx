@@ -68,12 +68,12 @@ export function Card({ title, actions, children, className, padded = true }: { t
   return (
     <section className={cx("rounded-lg border border-border bg-surface", className)}>
       {title || actions ? (
-        <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
           <h2 className="text-sm font-semibold">{title}</h2>
-          {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+          {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
         </header>
       ) : null}
-      <div className={padded ? "p-4" : ""}>{children}</div>
+      <div className={padded ? "p-4" : "overflow-x-auto"}>{children}</div>
     </section>
   );
 }

@@ -1,0 +1,38 @@
+name: CI
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - name: Install PostgreSQL 16
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-16 postgresql-contrib-16
+          sudo systemctl stop postgresql || true
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Start local Supabase-compatible stack (Postgres + Auth + PostgREST)
+        run: npm run stack:start && npm run db:reset
+      - name: Database workflow tests (RLS, ledger, counts, purchasing, sample week)
+        run: npm run test:db
+      - name: Build
+        run: npm run build
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests
+        run: |
+          npm run db:reset
+          (npm start > next.log 2>&1 &)
+          for i in $(seq 1 60); do curl -sf http://localhost:3000/login > /dev/null && break; sleep 1; done
+          npm run test:e2e

@@ -5,6 +5,7 @@ import { Sidebar, MobileNav } from "@/components/shell/sidebar";
 import { LocationSwitcher } from "@/components/shell/location-switcher";
 import { SyncIndicator } from "@/components/offline/sync-indicator";
 import { Icon } from "@/components/shell/icons";
+import { SignOutButton } from "@/components/shell/sign-out";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const ctx = await requireContext();
@@ -44,9 +45,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 <div className="truncate text-xs text-muted">{ctx.user.email}</div>
                 <div className="mt-1 text-xs text-muted">{ctx.roles.map((r) => r.name).join(", ")}</div>
               </div>
-              <form action="/auth/signout" method="post">
-                <button className="w-full rounded px-2 py-1.5 text-left text-sm hover:bg-surface-2">Sign out</button>
-              </form>
+              <SignOutButton />
             </div>
           </details>
         </header>

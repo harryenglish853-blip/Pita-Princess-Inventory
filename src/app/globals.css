@@ -110,3 +110,6 @@ dialog::backdrop { background: rgb(0 0 0 / 0.45); }
 /* Keep focused fields clear of the sticky header and the sticky action bar / bottom navigation */
 html { scroll-padding-top: 4.5rem; scroll-padding-bottom: 11rem; }
 @media (min-width: 1024px) { html { scroll-padding-bottom: 6rem; } }
+
+/* Grid items may shrink below their content width (prevents phone-width overflow from wide tables/inputs) */
+.grid > * { min-width: 0; }

@@ -16,6 +16,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const sp = await searchParams;
   const ctx = await requireContext();
   const supabase = await createClient();
+  // Operational alerts (late deliveries, unsubmitted orders, expiring lots, waste, variance) refresh before KPIs read them
+  await supabase.rpc("refresh_operational_alerts", { p_location: ctx.location.id });
   const { data, error } = await supabase.rpc("dashboard_kpis", { p_location: ctx.location.id });
   if (error) return <Notice tone="danger" title="Dashboard unavailable">{error.message}</Notice>;
   const k = data as K;

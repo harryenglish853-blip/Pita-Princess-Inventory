@@ -3,6 +3,8 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   typedRoutes: false,
+  // invoice photos / PDFs are sent to a server action for scanning
+  experimental: { serverActions: { bodySizeLimit: "12mb" } },
   headers: async () => [
     {
       source: "/sw.js",

@@ -8,6 +8,7 @@ import { Badge, Button, Card, Field, Input, Notice, Select, cx, inputBase } from
 import { Modal, useToast } from "@/components/client";
 import { money, qty } from "@/lib/format";
 import { cancelReceipt, completeReceiving, postReceipt, saveReceipt, type ReceiptTotals } from "../actions";
+import { InvoiceScanner, type ScanApply } from "./invoice-scanner";
 
 export type RLine = {
   id: string; product_id: string; product_name: string; product_number: string; inventory_unit: string; unit_code: string; unit_factor: number;
@@ -145,6 +146,14 @@ export function ReceiveScreen(p: {
     if (r?.ok) { setAdding(false); router.refresh(); } else toast({ tone: "error", text: r?.error ?? "Failed" });
   });
 
+  function applyScan(a: ScanApply) {
+    setHeader((h) => ({ ...h, ...Object.fromEntries(Object.entries(a.header).filter(([, v]) => v !== undefined)) }));
+    setHeaderDirty(true);
+    setLines((ls) => ls.map((l) => { const m = a.lines.find((x) => x.id === l.id); return m ? { ...l, invoiced_qty: m.invoiced_qty ?? l.invoiced_qty, invoice_price: m.invoice_price ?? l.invoice_price, invoice_extended: null } : l; }));
+    setChanged((c) => { const n = new Set(c); a.lines.forEach((x) => n.add(x.id)); return n; });
+    toast({ tone: "info", text: "Invoice values applied. Review them, then Save." });
+  }
+
   const dirty = headerDirty || changed.size > 0;
   const tempProblems = lines.filter((l) => exceptionsOf(l).includes("temp_out_of_range") && !l.temp_decision);
 
@@ -153,7 +162,10 @@ export function ReceiveScreen(p: {
       {p.status === "posted" ? <Notice tone="success" title="Reconciled and posted">Inventory, costs and price history were updated from this invoice. The receipt is locked.</Notice> : null}
       {p.status === "cancelled" ? <Notice tone="neutral" title="Cancelled" /> : null}
 
-      <Card title="Invoice" actions={!locked && p.status === "draft" ? <Button size="sm" onClick={receiveAll}>Everything arrived as ordered</Button> : null}>
+      <Card title="Invoice" actions={!locked ? <>
+        <InvoiceScanner receiptId={p.receiptId} lines={lines.map((l) => ({ id: l.id, product_name: l.product_name, vendor_item_number: l.vendor_item_number, unit_code: l.unit_code }))} onApply={applyScan} />
+        {p.status === "draft" ? <Button size="sm" onClick={receiveAll}>Everything arrived as ordered</Button> : null}
+      </> : null}>
         <fieldset disabled={locked} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <Field label="Delivery date"><Input type="date" value={header.delivery_date} onChange={(e) => setH("delivery_date", e.target.value)} /></Field>
           <Field label="Invoice #"><Input value={header.invoice_number} onChange={(e) => setH("invoice_number", e.target.value)} placeholder="From the vendor invoice" /></Field>

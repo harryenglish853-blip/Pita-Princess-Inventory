@@ -45,3 +45,30 @@ export async function newReceipt(vendorId: string): Promise<ActionState<{ id: st
   if (error) return fail(error);
   return ok(undefined, { id: data as string });
 }
+
+// ---------------------------------------------------------------- invoice scanning (AI-assisted, human-confirmed)
+import { extractInvoice, invoiceScannerConfigured, type ExtractedInvoice } from "@/lib/ai/invoice-extract";
+
+export async function scanInvoice(receiptId: string, fd: FormData): Promise<ActionState<{ invoice: ExtractedInvoice; scanId: string }>> {
+  const ctx = await requireContext();
+  const supabase = await createClient();
+  const { data: r } = await supabase.from("receipts").select("id, location_id, organization_id, status").eq("id", receiptId).single();
+  if (!r) return fail({ message: "Receipt not found" });
+  if (!ctx.locations.find((l) => l.id === r.location_id)?.permissions.includes("orders.receive")) return fail({ message: "You do not have permission to receive deliveries." });
+  if (!invoiceScannerConfigured()) return fail({ message: "Invoice scanning is not set up on this server (ANTHROPIC_API_KEY is missing). Enter the invoice manually." });
+  const file = fd.get("file");
+  if (!(file instanceof File) || file.size === 0) return fail({ message: "Choose a photo or PDF of the invoice" });
+  if (file.size > 20 * 1024 * 1024) return fail({ message: "The file is larger than 20 MB" });
+  const mediaType = file.type || "image/jpeg";
+  if (!["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"].includes(mediaType)) return fail({ message: "Use a JPEG, PNG, WebP or PDF file" });
+  try {
+    const { invoice, model } = await extractInvoice({ base64: Buffer.from(await file.arrayBuffer()).toString("base64"), mediaType });
+    const { data: scan, error } = await supabase.from("invoice_scans").insert({
+      organization_id: r.organization_id, location_id: r.location_id, receipt_id: receiptId, file_name: file.name, media_type: mediaType, extracted: invoice, model,
+    }).select("id").single();
+    if (error) return fail(error);
+    return ok("Invoice read. Check every value before applying.", { invoice, scanId: scan.id });
+  } catch (e) {
+    return fail({ message: (e as Error).message || "The invoice could not be read" });
+  }
+}
