@@ -1,6 +1,6 @@
-import { Bell, Boxes, ChartColumn, ClipboardList, Home, Layers, Menu, Search, Settings, ShoppingCart, Store, Truck, Trash2, ChefHat } from "lucide-react";
+import { Bell, Boxes, ChartColumn, ClipboardList, Home, Layers, Menu, Search, Settings, ShoppingCart, Store, Truck, Trash2, ChefHat, Shuffle, Flame, Receipt, Percent } from "lucide-react";
 
-const map = { home: Home, bell: Bell, boxes: Boxes, clipboard: ClipboardList, layers: Layers, cart: ShoppingCart, truck: Truck, store: Store, chart: ChartColumn, settings: Settings, menu: Menu, search: Search, trash: Trash2, chef: ChefHat };
+const map = { home: Home, bell: Bell, boxes: Boxes, clipboard: ClipboardList, layers: Layers, cart: ShoppingCart, truck: Truck, store: Store, chart: ChartColumn, settings: Settings, menu: Menu, search: Search, trash: Trash2, chef: ChefHat, shuffle: Shuffle, flame: Flame, receipt: Receipt, percent: Percent };
 
 export function Icon({ name, className }: { name: string; className?: string }) {
   const C = map[name as keyof typeof map] ?? Home;
