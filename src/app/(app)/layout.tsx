@@ -25,14 +25,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <div className="min-w-0">
         <header className="no-print sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-border bg-surface/95 px-3 backdrop-blur sm:px-4">
           <LocationSwitcher locations={ctx.locations} current={ctx.location.id} />
-          <form action="/search" className="ml-auto flex min-w-0 max-w-md flex-1 items-center justify-end">
+          <Link href="/search" aria-label="Search" className="ml-auto grid h-9 w-9 place-items-center rounded-md text-muted hover:bg-surface-2 sm:hidden"><Icon name="search" className="h-5 w-5" /></Link>
+          <form action="/search" className="ml-auto hidden min-w-0 max-w-md flex-1 items-center justify-end sm:flex">
             <label className="relative w-full max-w-xs">
               <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"><Icon name="search" /></span>
               <input name="q" type="search" placeholder="Search products, POs, invoices, lots…" aria-label="Global search"
                 className="h-9 w-full rounded-md border border-border bg-surface-2 pl-8 pr-2 text-sm focus:border-brand focus:bg-surface focus:outline-none" />
             </label>
           </form>
-          <SyncIndicator />
+          <span className="hidden sm:inline-flex"><SyncIndicator /></span>
           <details className="relative">
             <summary className="grid h-9 w-9 cursor-pointer list-none place-items-center rounded-full bg-brand-soft text-sm font-semibold text-brand" aria-label="Account">
               {(ctx.user.full_name ?? ctx.user.email).slice(0, 1).toUpperCase()}
