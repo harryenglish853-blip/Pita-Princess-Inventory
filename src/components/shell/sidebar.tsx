@@ -36,13 +36,20 @@ export function Sidebar({ items }: { items: NavItem[] }) {
   );
 }
 
-export function MobileNav({ items }: { items: NavItem[] }) {
+export function MobileNav({ items, ordering }: { items: NavItem[]; ordering: boolean }) {
   const pathname = usePathname();
-  const tabs = [
+  const tabs = ordering ? [
     { href: "/", label: "Home", icon: "home" },
     { href: "/counts", label: "Count", icon: "clipboard", primary: true },
     { href: "/purchasing", label: "Order", icon: "cart" },
     { href: "/receiving", label: "Receive", icon: "truck" },
+    { href: "/more", label: "More", icon: "menu" },
+  ] : [
+    // Orders are placed in the vendors' own apps; deliveries are recorded here
+    { href: "/", label: "Home", icon: "home" },
+    { href: "/receiving", label: "Receive", icon: "truck" },
+    { href: "/counts", label: "Count", icon: "clipboard", primary: true },
+    { href: "/waste", label: "Waste", icon: "trash" },
     { href: "/more", label: "More", icon: "menu" },
   ];
   return (

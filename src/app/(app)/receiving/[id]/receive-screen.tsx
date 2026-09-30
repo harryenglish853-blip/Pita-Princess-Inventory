@@ -53,8 +53,11 @@ function exceptionsOf(l: RLine): string[] {
 
 export function ReceiveScreen(p: {
   receiptId: string; status: string; vendorName: string; poNumber: string | null; initialHeader: Header; initialLines: RLine[]; initialTotals: ReceiptTotals;
-  storages: { id: string; name: string }[]; products: Product[]; canReceive: boolean; canReconcile: boolean; canOverride: boolean;
+  storages: { id: string; name: string }[]; products: Product[]; otherProducts?: { id: string; name: string }[];
+  canReceive: boolean; canReconcile: boolean; canOverride: boolean;
 }) {
+  // No purchase order: the store ordered in the vendor's own app and records the delivery here.
+  const noOrder = !p.poNumber;
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -65,7 +68,8 @@ export function ReceiveScreen(p: {
   const [totals, setTotals] = useState<ReceiptTotals>(p.initialTotals);
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [newLine, setNewLine] = useState({ product_id: "", line_type: "substitution", substitute_for_id: "" });
+  const [newLine, setNewLine] = useState({ product_id: "", line_type: noOrder ? "unordered" : "substitution", substitute_for_id: "" });
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const [postDialog, setPostDialog] = useState(false);
   const [overrideReason, setOverrideReason] = useState("");
   const locked = !["draft", "received"].includes(p.status) || !p.canReceive;
@@ -138,6 +142,24 @@ export function ReceiveScreen(p: {
     setLines((ls) => ls.map((l) => withDefaultStorage({ ...l, received_qty: l.received_qty ?? l.ordered_qty, invoiced_qty: l.invoiced_qty ?? l.ordered_qty })));
     setChanged(new Set(lines.map((l) => l.id)));
   };
+  // Without an order the invoice is the list: received = invoiced wherever nothing was entered yet.
+  const receiveAsInvoiced = () => {
+    setLines((ls) => ls.map((l) => (l.received_qty === null && l.invoiced_qty !== null ? withDefaultStorage({ ...l, received_qty: l.invoiced_qty }) : l)));
+    setChanged(new Set(lines.filter((l) => l.received_qty === null && l.invoiced_qty !== null).map((l) => l.id)));
+  };
+  const onReceipt = new Set(lines.map((l) => l.product_id));
+  const addPicked = () => run(async () => {
+    if (!picked.size || !(await persist())) return;
+    const add = [...picked].map((id) => ({ product_id: id, vendor_product_id: p.products.find((x) => x.id === id)?.vendor_product_id ?? "", line_type: "unordered" }));
+    const r = await saveReceipt(p.receiptId, null, add);
+    if (r?.ok) { setPicked(new Set()); toast({ tone: "success", text: `${add.length} item(s) added. Enter what arrived.` }); router.refresh(); }
+    else toast({ tone: "error", text: r?.error ?? "Failed" });
+  });
+  const removeLine = (id: string) => run(async () => {
+    if (!(await persist())) return;
+    const r = await saveReceipt(p.receiptId, null, [{ id, remove: true }]);
+    if (r?.ok) router.refresh(); else toast({ tone: "error", text: r?.error ?? "Failed" });
+  });
   const addLine = () => run(async () => {
     if (!newLine.product_id) return;
     if (!(await persist())) return;
@@ -147,6 +169,21 @@ export function ReceiveScreen(p: {
   });
 
   function applyScan(a: ScanApply) {
+    if (a.newLines.length) {
+      // New lines need ids from the server: save the header, matched lines and the new lines together.
+      // Nothing reaches inventory until someone enters what arrived and the invoice is posted.
+      run(async () => {
+        if (!(await persist())) return;
+        const header = Object.fromEntries(Object.entries(a.header).filter(([, v]) => v !== undefined));
+        const r = await saveReceipt(p.receiptId, Object.keys(header).length ? header : null, [
+          ...a.lines.map((l) => ({ id: l.id, invoiced_qty: toS(l.invoiced_qty), invoice_price: toS(l.invoice_price), invoice_extended: "" })),
+          ...a.newLines.map((l) => ({ product_id: l.product_id, vendor_product_id: l.vendor_product_id ?? "", line_type: "unordered", invoiced_qty: toS(l.invoiced_qty), invoice_price: toS(l.invoice_price) })),
+        ]);
+        if (r?.ok) { toast({ tone: "info", text: `Invoice read: ${a.newLines.length} item(s) added. Check each against what arrived.` }); router.refresh(); }
+        else toast({ tone: "error", text: r?.error ?? "Failed" });
+      });
+      return;
+    }
     setHeader((h) => ({ ...h, ...Object.fromEntries(Object.entries(a.header).filter(([, v]) => v !== undefined)) }));
     setHeaderDirty(true);
     setLines((ls) => ls.map((l) => { const m = a.lines.find((x) => x.id === l.id); return m ? { ...l, invoiced_qty: m.invoiced_qty ?? l.invoiced_qty, invoice_price: m.invoice_price ?? l.invoice_price, invoice_extended: null } : l; }));
@@ -163,8 +200,10 @@ export function ReceiveScreen(p: {
       {p.status === "cancelled" ? <Notice tone="neutral" title="Cancelled" /> : null}
 
       <Card title="Invoice" actions={!locked ? <>
-        <InvoiceScanner receiptId={p.receiptId} lines={lines.map((l) => ({ id: l.id, product_name: l.product_name, vendor_item_number: l.vendor_item_number, unit_code: l.unit_code }))} onApply={applyScan} />
-        {p.status === "draft" ? <Button size="sm" onClick={receiveAll}>Everything arrived as ordered</Button> : null}
+        <InvoiceScanner receiptId={p.receiptId} lines={lines.map((l) => ({ id: l.id, product_name: l.product_name, vendor_item_number: l.vendor_item_number, unit_code: l.unit_code }))}
+          catalog={p.products} onApply={applyScan} />
+        {p.status === "draft" && !noOrder ? <Button size="sm" onClick={receiveAll}>Everything arrived as ordered</Button> : null}
+        {p.status === "draft" && noOrder && lines.some((l) => l.received_qty === null && l.invoiced_qty !== null) ? <Button size="sm" onClick={receiveAsInvoiced}>Everything on the invoice arrived</Button> : null}
       </> : null}>
         <fieldset disabled={locked} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <Field label="Delivery date"><Input type="date" value={header.delivery_date} onChange={(e) => setH("delivery_date", e.target.value)} /></Field>
@@ -187,10 +226,10 @@ export function ReceiveScreen(p: {
             <div key={l.id} className={cx("border-b border-border", exc.some((e) => ["short", "missing", "over", "temp_out_of_range", "invoice_qty_mismatch"].includes(e)) && "bg-warning-soft/60")}>
               <div className="grid grid-cols-2 items-center gap-2 px-3 py-2 text-sm lg:grid-cols-[minmax(12rem,2fr)_5rem_7rem_7rem_7rem_6rem_minmax(8rem,1.2fr)_2rem]">
                 <div className="col-span-2 cursor-pointer lg:col-span-1" onClick={() => setOpen(isOpen ? null : l.id)}>
-                  <div className="font-medium">{l.product_name}{l.line_type !== "ordered" ? <Badge tone="info" className="ml-1">{l.line_type.replace("_", " ")}</Badge> : null}</div>
+                  <div className="font-medium">{l.product_name}{l.line_type !== "ordered" && !(noOrder && l.line_type === "unordered") ? <Badge tone="info" className="ml-1">{l.line_type.replace("_", " ")}</Badge> : null}</div>
                   <div className="text-[11px] text-muted">{l.vendor_item_number ?? "—"} · {l.unit_code} = {Number(l.unit_factor)} {l.inventory_unit}{l.contract_price !== null ? ` · contract ${money(l.contract_price)}` : ""}</div>
                 </div>
-                <div className="flex justify-between lg:block lg:text-right"><span className="text-[11px] text-muted lg:hidden">Ordered</span><span className="tabular-nums">{qty(l.ordered_qty, l.unit_code)}</span></div>
+                <div className={cx("flex justify-between lg:block lg:text-right", noOrder && "hidden")}><span className="text-[11px] text-muted lg:hidden">Ordered</span><span className="tabular-nums">{noOrder ? "—" : qty(l.ordered_qty, l.unit_code)}</span></div>
                 <QtyInput label="Received" value={l.received_qty} disabled={locked} onChange={(v) => upd(l.id, { received_qty: v })} unit={l.unit_code} testId={`received-${l.product_number}`} />
                 <QtyInput label="Invoiced" value={l.invoiced_qty} disabled={locked} onChange={(v) => upd(l.id, { invoiced_qty: v })} unit={l.unit_code} testId={`invoiced-${l.product_number}`} />
                 <QtyInput label="Price" value={l.invoice_price} disabled={locked} onChange={(v) => upd(l.id, { invoice_price: v, invoice_extended: null })} prefix="$" />
@@ -204,11 +243,43 @@ export function ReceiveScreen(p: {
                 </button>
               </div>
               {isOpen ? <LineDetails line={l} locked={locked} storages={p.storages} onChange={(patch) => upd(l.id, patch)} /> : null}
+              {isOpen && !locked && l.line_type !== "ordered" ? (
+                <div className="flex justify-end border-t border-border bg-surface-2/60 px-3 py-2">
+                  <Button size="sm" variant="ghost" onClick={() => removeLine(l.id)} disabled={pending}>Remove {l.product_name} from this delivery</Button>
+                </div>
+              ) : null}
             </div>
           );
         })}
-        {!lines.length ? <div className="p-6 text-center text-sm text-muted">No lines yet — add the delivered products below.</div> : null}
-        {!locked ? (
+        {!lines.length ? <div className="p-6 text-center text-sm text-muted">{noOrder ? "Scan the invoice, or tick the items that arrived below." : "No lines yet — add the delivered products below."}</div> : null}
+        {!locked && noOrder ? (
+          <div className="space-y-3 p-3" data-testid="add-items">
+            <div className="text-sm font-medium">Add items from {p.vendorName}</div>
+            <div className="flex flex-wrap gap-1.5">
+              {p.products.filter((x) => !onReceipt.has(x.id)).map((x) => (
+                <label key={x.id} className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm has-[:checked]:border-brand has-[:checked]:bg-brand-soft">
+                  <input type="checkbox" checked={picked.has(x.id)} onChange={(e) => setPicked((s) => { const n = new Set(s); if (e.target.checked) n.add(x.id); else n.delete(x.id); return n; })} />
+                  {x.name}
+                </label>
+              ))}
+              {!p.products.filter((x) => !onReceipt.has(x.id)).length ? <span className="text-sm text-muted">Every item on this vendor&apos;s list is already on the delivery.</span> : null}
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <Button variant="primary" size="sm" onClick={addPicked} disabled={pending || !picked.size}>Add {picked.size || ""} item{picked.size === 1 ? "" : "s"}</Button>
+              {p.otherProducts?.length ? (
+                <>
+                  <Field label="Something else" className="min-w-52">
+                    <Select value={newLine.product_id} onChange={(e) => setNewLine((n) => ({ ...n, product_id: e.target.value }))}>
+                      <option value="">Choose a product…</option>{p.otherProducts.filter((x) => !onReceipt.has(x.id)).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                    </Select>
+                  </Field>
+                  <Button size="sm" onClick={addLine} disabled={pending || !newLine.product_id}>Add</Button>
+                </>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        {!locked && !noOrder ? (
           <div className="p-3">
             {adding ? (
               <div className="flex flex-wrap items-end gap-2">
@@ -277,7 +348,7 @@ export function ReceiveScreen(p: {
 
       <Modal open={postDialog} onClose={() => setPostDialog(false)} title="Reconcile and post invoice">
         <div className="space-y-2 text-sm">
-          <p>Posting adds received quantities to inventory, updates average and latest cost, records price history, closes or back-orders PO lines and locks this receipt. It happens all at once or not at all.</p>
+          <p>Posting adds received quantities to inventory, updates average and latest cost, records price history{noOrder ? "" : ", closes or back-orders PO lines"} and locks this receipt. It happens all at once or not at all.</p>
           <div className="rounded-md bg-surface-2 p-2">Calculated {money(live.calc.toNumber())} · Invoice {live.inv ? money(live.inv.toNumber()) : "—"} · Over/short <b className={within ? "text-success" : "text-danger"}>{live.overShort ? money(live.overShort.toNumber(), { sign: true }) : "—"}</b></div>
           {!within && live.overShort !== null ? (
             p.canOverride ? (

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireContext, can } from "@/lib/session";
+import { requireContext, visibleNav } from "@/lib/session";
 import { NAV } from "@/components/shell/nav-items";
 import { Icon } from "@/components/shell/icons";
 import { PageHeader } from "@/components/ui";
@@ -9,7 +9,7 @@ export const metadata = { title: "More" };
 
 export default async function MorePage() {
   const ctx = await requireContext();
-  const items = NAV.filter((i) => !i.perm || can(ctx, i.perm));
+  const items = visibleNav(ctx, NAV);
   return (
     <>
       <PageHeader title="More" />

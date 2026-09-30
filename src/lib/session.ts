@@ -19,7 +19,7 @@ export type LocationCtx = {
 
 export type SessionCtx = {
   user: { id: string; email: string; full_name: string | null; default_location_id: string | null };
-  organizations: { id: string; name: string; currency: string }[];
+  organizations: { id: string; name: string; currency: string; settings?: { ordering_enabled?: boolean } }[];
   locations: LocationCtx[];
   org_permissions: { organization_id: string; permission: Permission }[];
   roles: { role: string; name: string; scope_type: string; scope_id: string }[];
@@ -62,4 +62,18 @@ export async function requirePermission(perm: Permission): Promise<AppContext> {
   const ctx = await requireContext();
   if (!can(ctx, perm)) redirect(`/denied?perm=${encodeURIComponent(perm)}`);
   return ctx;
+}
+
+/**
+ * Purchase orders are optional: many stores order in each vendor's own app and
+ * only record deliveries here. Off unless the organization turns it on.
+ */
+export function orderingEnabled(ctx: AppContext): boolean {
+  return ctx.organizations.find((o) => o.id === ctx.organizationId)?.settings?.ordering_enabled === true;
+}
+
+/** Navigation the user can see: permissions plus organization features. */
+export function visibleNav<T extends { perm?: Permission; feature?: "ordering" }>(ctx: AppContext, items: T[]): T[] {
+  const ordering = orderingEnabled(ctx);
+  return items.filter((i) => (!i.perm || can(ctx, i.perm)) && (i.feature !== "ordering" || ordering));
 }

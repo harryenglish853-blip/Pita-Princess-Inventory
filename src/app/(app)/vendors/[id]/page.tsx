@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { requirePermission, can, canOrg } from "@/lib/session";
+import { requirePermission, can, canOrg, orderingEnabled } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 import { ActionForm, ModalButton, SubmitButton } from "@/components/client";
 import { Badge, Card, Field, Input, LinkButton, PageHeader, Select, StatusBadge } from "@/components/ui";
@@ -13,14 +13,16 @@ export default async function VendorPage({ params }: { params: Promise<{ id: str
   const { id } = await params;
   const ctx = await requirePermission("orders.view");
   const supabase = await createClient();
-  const [{ data: vendor }, { data: guide }, { data: products }, { data: options }, { data: orders }, { data: storeOverride }] = await Promise.all([
+  const [{ data: vendor }, { data: guide }, { data: products }, { data: options }, { data: orders }, { data: storeOverride }, { data: deliveries }] = await Promise.all([
     supabase.from("vendors").select("*").eq("id", id).single(),
     supabase.from("vendor_products").select("*, product:products(id, name, product_number, inventory_unit_id), unit:units(code)").eq("vendor_id", id).order("guide_sort").order("vendor_item_number"),
     supabase.from("products").select("id, name, product_number").eq("active", true).order("name"),
     supabase.from("product_unit_options").select("product_id, unit_id, unit_code, factor, is_inventory_unit, use_for_purchase, priority"),
     supabase.from("purchase_orders").select("id, po_number, status, expected_delivery_date").eq("vendor_id", id).eq("location_id", ctx.location.id).order("created_at", { ascending: false }).limit(10),
     supabase.from("location_vendors").select("delivery_days, lead_time_days, order_cutoff, account_number, active, notes").eq("vendor_id", id).eq("location_id", ctx.location.id).maybeSingle(),
+    supabase.from("receipts").select("id, receipt_number, status, delivery_date, invoice_number, invoice_total").eq("vendor_id", id).eq("location_id", ctx.location.id).order("delivery_date", { ascending: false }).limit(10),
   ]);
+  const ordering = orderingEnabled(ctx);
   if (!vendor) notFound();
   const edit = canOrg(ctx, "vendors.edit");
   const showCost = can(ctx, "reports.view_cost");
@@ -66,7 +68,8 @@ export default async function VendorPage({ params }: { params: Promise<{ id: str
       <PageHeader title={<span className="flex items-center gap-2">{vendor.name}{!vendor.active ? <Badge tone="danger">Inactive</Badge> : null}</span>}
         back={{ href: "/vendors", label: "Vendors" }}
         subtitle={`${vendor.vendor_number ?? ""} · Account ${vendor.account_number ?? "—"} · ${vendor.sales_rep ?? ""} ${vendor.phone ?? ""}`}
-        actions={can(ctx, "orders.create") ? <LinkButton variant="primary" href={`/purchasing/new?vendor=${id}`}>Create order</LinkButton> : null} />
+        actions={ordering && can(ctx, "orders.create") ? <LinkButton variant="primary" href={`/purchasing/new?vendor=${id}`}>Create order</LinkButton>
+          : can(ctx, "orders.receive") ? <LinkButton variant="primary" href={`/receiving?log=${id}`}>Log a delivery</LinkButton> : null} />
       <div className="grid gap-4 xl:grid-cols-[1fr_22rem]">
         <Card title={`Order guide (${guide?.length ?? 0} items)`} padded={false}
           actions={edit ? <ModalButton label="Add item" title="Add order guide item" size="sm" variant="primary">{itemForm(null)}</ModalButton> : null}>
@@ -100,12 +103,26 @@ export default async function VendorPage({ params }: { params: Promise<{ id: str
         <div className="space-y-4">
           <StoreVendorSettings vendorId={id} storeLabel={`#${ctx.location.code} ${ctx.location.name}`} company={vendor}
             override={storeOverride} editable={can(ctx, "products.local_edit")} />
-          <Card title="Recent orders">
+          {ordering ? (
+            <Card title="Recent orders">
+              <ul className="space-y-1 text-sm">
+                {(orders ?? []).map((o) => (
+                  <li key={o.id} className="flex items-center justify-between gap-2"><Link className="text-brand" href={`/purchasing/${o.id}`}>{o.po_number}</Link><span className="text-muted">{dateFmt(o.expected_delivery_date)}</span><StatusBadge status={o.status} /></li>
+                ))}
+                {!orders?.length ? <li className="text-muted">No orders yet</li> : null}
+              </ul>
+            </Card>
+          ) : null}
+          <Card title="Recent deliveries">
             <ul className="space-y-1 text-sm">
-              {(orders ?? []).map((o) => (
-                <li key={o.id} className="flex items-center justify-between gap-2"><Link className="text-brand" href={`/purchasing/${o.id}`}>{o.po_number}</Link><span className="text-muted">{dateFmt(o.expected_delivery_date)}</span><StatusBadge status={o.status} /></li>
+              {(deliveries ?? []).map((d) => (
+                <li key={d.id} className="flex items-center justify-between gap-2">
+                  <Link className="text-brand" href={`/receiving/${d.id}`}>{dateFmt(d.delivery_date)}</Link>
+                  <span className="truncate text-muted">{d.invoice_number ? `Inv ${d.invoice_number}` : d.receipt_number}{showCost && d.invoice_total != null ? ` · ${money(d.invoice_total)}` : ""}</span>
+                  <StatusBadge status={d.status} />
+                </li>
               ))}
-              {!orders?.length ? <li className="text-muted">No orders yet</li> : null}
+              {!deliveries?.length ? <li className="text-muted">No deliveries recorded yet</li> : null}
             </ul>
           </Card>
         </div>

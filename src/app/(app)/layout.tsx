@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireContext, can } from "@/lib/session";
+import { requireContext, visibleNav } from "@/lib/session";
 import { NAV } from "@/components/shell/nav-items";
 import { Sidebar, MobileNav } from "@/components/shell/sidebar";
 import { LocationSwitcher } from "@/components/shell/location-switcher";
@@ -9,7 +9,7 @@ import { SignOutButton } from "@/components/shell/sign-out";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const ctx = await requireContext();
-  const items = NAV.filter((i) => !i.perm || can(ctx, i.perm));
+  const items = visibleNav(ctx, NAV);
   const org = ctx.organizations.find((o) => o.id === ctx.organizationId);
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[15rem_1fr]">
@@ -30,7 +30,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <form action="/search" className="ml-auto hidden min-w-0 max-w-md flex-1 items-center justify-end sm:flex">
             <label className="relative w-full max-w-xs">
               <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"><Icon name="search" /></span>
-              <input name="q" type="search" placeholder="Search products, POs, invoices, lots…" aria-label="Global search"
+              <input name="q" type="search" placeholder="Search products, invoices, lots…" aria-label="Global search"
                 className="h-9 w-full rounded-md border border-border bg-surface-2 pl-8 pr-2 text-sm focus:border-brand focus:bg-surface focus:outline-none" />
             </label>
           </form>
@@ -51,7 +51,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </header>
         <main className="mx-auto max-w-[1400px] px-3 pb-28 pt-4 sm:px-5 lg:pb-10">{children}</main>
       </div>
-      <MobileNav items={items} />
+      <MobileNav items={items} ordering={items.some((i) => i.href === "/purchasing")} />
     </div>
   );
 }

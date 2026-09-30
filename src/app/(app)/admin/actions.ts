@@ -101,3 +101,12 @@ export async function saveHierarchy(kind: "regions" | "districts", _: ActionStat
   if (error) return fail(error);
   return ok(kind === "regions" ? "Region added" : "District added");
 }
+
+/** Turns the purchase-order screens on or off for the whole organization. */
+export async function setOrderingEnabled(enabled: boolean): Promise<ActionState> {
+  const ctx = await requireContext();
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_organization_setting", { p_org: ctx.organizationId, p_key: "ordering_enabled", p_value: enabled });
+  if (error) return fail(error);
+  return ok(enabled ? "Ordering turned on" : "Ordering turned off: deliveries are logged from invoices");
+}

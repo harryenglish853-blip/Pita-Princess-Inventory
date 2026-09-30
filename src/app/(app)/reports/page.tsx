@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requirePermission, can } from "@/lib/session";
+import { requirePermission, can, orderingEnabled } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 import { DataTable, type Column } from "@/components/data-table";
 import { Card, Input, Notice, PageHeader, cx } from "@/components/ui";
@@ -7,7 +7,7 @@ import { todayIn } from "@/lib/format";
 
 export const metadata = { title: "Reports" };
 
-const REPORTS: { key: string; label: string; group: string; cost?: boolean; dated?: boolean }[] = [
+const REPORTS: { key: string; label: string; group: string; cost?: boolean; dated?: boolean; ordering?: boolean }[] = [
   { key: "valuation", label: "Inventory extended value", group: "Inventory", cost: true },
   { key: "efficiency", label: "Usage, turns, days on hand & aging", group: "Inventory", cost: true },
   { key: "counts", label: "Physical inventory summary", group: "Inventory", cost: true, dated: true },
@@ -16,8 +16,8 @@ const REPORTS: { key: string; label: string; group: string; cost?: boolean; date
   { key: "purchases", label: "Purchases by vendor / product / category", group: "Purchasing", cost: true, dated: true },
   { key: "price-variance", label: "Contract vs invoice price variance", group: "Purchasing", cost: true, dated: true },
   { key: "price-history", label: "Price changes", group: "Purchasing", cost: true, dated: true },
-  { key: "vendors", label: "Vendor delivery & order accuracy", group: "Purchasing", dated: true },
-  { key: "order-accuracy", label: "System suggestion vs manager order", group: "Purchasing", dated: true },
+  { key: "vendors", label: "Vendor delivery & order accuracy", group: "Purchasing", dated: true, ordering: true },
+  { key: "order-accuracy", label: "System suggestion vs manager order", group: "Purchasing", dated: true, ordering: true },
   { key: "lots", label: "Lot recall search", group: "Traceability" },
 ];
 const LINKS = [
@@ -29,7 +29,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   const ctx = await requirePermission("reports.view");
   const showCost = can(ctx, "reports.view_cost");
-  const available = REPORTS.filter((r) => !r.cost || showCost);
+  const ordering = orderingEnabled(ctx);
+  const available = REPORTS.filter((r) => (!r.cost || showCost) && (!r.ordering || ordering));
   const r = available.find((x) => x.key === sp.r) ?? available[0];
   const from = sp.from ?? todayIn(ctx.location.timezone, -30);
   const to = sp.to ?? todayIn(ctx.location.timezone);

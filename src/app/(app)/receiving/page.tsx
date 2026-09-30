@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requirePermission, can } from "@/lib/session";
+import { requirePermission, can, orderingEnabled } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 import { ActionButton } from "@/components/client";
 import { Card, EmptyState, PageHeader, StatusBadge } from "@/components/ui";
@@ -10,8 +10,10 @@ import { NewReceiptButton } from "./new-receipt";
 
 export const metadata = { title: "Receiving" };
 
-export default async function ReceivingPage() {
+export default async function ReceivingPage({ searchParams }: { searchParams: Promise<{ log?: string }> }) {
+  const sp = await searchParams;
   const ctx = await requirePermission("orders.receive");
+  const ordering = orderingEnabled(ctx);
   const supabase = await createClient();
   const today = todayIn(ctx.location.timezone);
   const [{ data: expected }, { data: receipts }, { data: vendors }] = await Promise.all([
@@ -19,17 +21,19 @@ export default async function ReceivingPage() {
       .in("status", ["submitted", "confirmed", "back_ordered", "partially_received"]).order("expected_delivery_date"),
     supabase.from("receipts").select("id, receipt_number, status, invoice_number, invoice_total, delivery_date, received_at, posted_at, purchase_order_id, vendor:vendors(name), po:purchase_orders(po_number)")
       .eq("location_id", ctx.location.id).order("created_at", { ascending: false }).limit(300),
-    supabase.from("vendors").select("id, name").eq("active", true).order("name"),
+    // Vendors this store buys from (store settings can switch a vendor off)
+    supabase.from("location_vendor_settings").select("id:vendor_id, name:vendor_name").eq("location_id", ctx.location.id).eq("active", true).order("vendor_name"),
   ]);
   const inProgress = (receipts ?? []).filter((r) => ["draft", "received"].includes(r.status));
   const openByPo = new Map(inProgress.filter((r) => r.purchase_order_id).map((r) => [r.purchase_order_id!, r.id]));
-  const history = (receipts ?? []).map((r) => ({ ...r, vendor_name: (r.vendor as unknown as { name: string }).name, po_number: (r.po as unknown as { po_number: string } | null)?.po_number ?? "No PO" }));
+  const history = (receipts ?? []).map((r) => ({ ...r, vendor_name: (r.vendor as unknown as { name: string }).name, po_number: (r.po as unknown as { po_number: string } | null)?.po_number ?? "—" }));
   return (
     <>
-      <PageHeader title="Receiving" subtitle="Receive deliveries, check them against the order and invoice, then reconcile"
-        actions={<NewReceiptButton vendors={vendors ?? []} />} />
+      <PageHeader title="Receiving"
+        subtitle={ordering ? "Receive deliveries, check them against the order and invoice, then reconcile" : "Record each delivery from its invoice: what arrived, what it cost. Stock and costs update when it's posted."}
+        actions={<NewReceiptButton vendors={vendors ?? []} label={ordering ? "Receive without PO" : "Log a delivery"} primary={!ordering} openFor={sp.log} />} />
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="Pending deliveries" padded={false}>
+        {ordering ? <Card title="Pending deliveries" padded={false}>
           {expected?.length ? (
             <ul className="divide-y divide-border">
               {expected.map((po) => (
@@ -46,8 +50,8 @@ export default async function ReceivingPage() {
               ))}
             </ul>
           ) : <div className="p-4"><EmptyState title="No deliveries expected" /></div>}
-        </Card>
-        <Card title="Needs reconciliation" padded={false}>
+        </Card> : null}
+        <Card title={ordering ? "Needs reconciliation" : "In progress"} padded={false} className={ordering ? undefined : "lg:col-span-2"}>
           {inProgress.length ? (
             <ul className="divide-y divide-border">
               {inProgress.map((r) => (
@@ -60,14 +64,14 @@ export default async function ReceivingPage() {
                 </li>
               ))}
             </ul>
-          ) : <div className="p-4"><EmptyState title="Nothing waiting" /></div>}
+          ) : <div className="p-4"><EmptyState title="Nothing waiting">{ordering ? null : "When a truck arrives, tap Log a delivery."}</EmptyState></div>}
         </Card>
       </div>
       <h2 className="mb-2 mt-6 text-sm font-semibold text-muted">RECEIVING HISTORY</h2>
       <DataTable id="receipts" rows={history} exportName="receipts" columns={[
         { key: "receipt_number", label: "Receipt", href: "/receiving/{id}" },
         { key: "vendor_name", label: "Vendor", filterable: true },
-        { key: "po_number", label: "PO" },
+        ...(ordering ? [{ key: "po_number", label: "PO" }] : []),
         { key: "invoice_number", label: "Invoice #" },
         { key: "delivery_date", label: "Delivered", format: "date" },
         { key: "invoice_total", label: "Invoice total", format: "money", total: true },

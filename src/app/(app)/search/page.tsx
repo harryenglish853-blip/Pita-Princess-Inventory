@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireContext } from "@/lib/session";
+import { requireContext, orderingEnabled } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 import { Badge, Card, EmptyState, Input, PageHeader } from "@/components/ui";
 
@@ -10,11 +10,13 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const ctx = await requireContext();
   const supabase = await createClient();
   const { data } = q.trim().length >= 2 ? await supabase.rpc("global_search", { p_q: q, p_location: ctx.location.id }) : { data: [] };
-  const results = (data ?? []) as { kind: string; id: string; title: string; subtitle: string; href: string }[];
+  // Purchase orders are hidden when the organization orders in vendor apps
+  const results = ((data ?? []) as { kind: string; id: string; title: string; subtitle: string; href: string }[])
+    .filter((r) => orderingEnabled(ctx) || !r.href.startsWith("/purchasing"));
   const kinds = Array.from(new Set(results.map((r) => r.kind)));
   return (
     <>
-      <PageHeader title="Search" subtitle="Products, UPCs, vendor item numbers, vendors, purchase orders, invoices, counts, lots, locations, transactions" />
+      <PageHeader title="Search" subtitle="Products, UPCs, vendor item numbers, vendors, invoices, counts, lots, locations, transactions" />
       <form className="mb-4"><Input name="q" defaultValue={q} autoFocus placeholder="Search…" type="search" aria-label="Search" /></form>
       {q.trim().length >= 2 && !results.length ? <EmptyState title={`Nothing found for “${q}”`} /> : null}
       <div className="space-y-4">

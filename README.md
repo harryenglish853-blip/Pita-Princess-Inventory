@@ -55,13 +55,17 @@ scripts/local-stack/     Docker-free Supabase-compatible stack for dev/CI
 | 6–7 | Book inventory & review | Begin + received ± transfers + produced − used − waste ± adjustments = book; variance qty/$/%; tolerance flags → recount; posting creates variance transactions and locks the count |
 | 8–9 | Vendors & order guides | Delivery days, cutoffs, minimums, contract prices, multi-vendor price comparison; per-store delivery days, lead time, cutoff and account number |
 | 10–12 | Forecasting, dynamic pars, suggested ordering | Same-weekday sales forecast × trend; day-of-week demand; NEED − HAVE with transparent explanations |
-| 13–19 | Purchase orders, receiving, reconciliation, lots, temperatures | Status workflow, short/over/substitution/rejected/damaged/catch weight/back order, storage put-away, invoice over/short with tolerance and override reason, recall search |
+| 13–19 | Receiving, reconciliation, lots, temperatures (purchase orders optional) | Status workflow, short/over/substitution/rejected/damaged/catch weight/back order, storage put-away, invoice over/short with tolerance and override reason, recall search |
 | 16 | Invoice scanner | Photo/PDF → Claude structured extraction → side-by-side review → apply; never posts on its own |
 | 20–22 | Transfers & waste | Storage and store-to-store transfers (in-transit), fast waste logging incl. prepared/menu items |
 | 23–26 | Recipes & production | Nested recipes with cost roll-up, prep items produced into inventory, yield variance, suggested prep |
 | 27–31 | POS & food cost | Adapter-neutral POS import, theoretical usage, actual vs theoretical with drill-downs |
 | 40–41 | Reports & export | Valuation, efficiency/turns/aging, count summaries, ledger, adjustments, purchases, price variance, price changes, vendor performance, order accuracy, lot recall; CSV, Excel, print/PDF, saved views |
 | 45–46 | Users, permissions, audit | 11 roles, 30 granular permissions, scoped assignments, audit log viewer |
+
+## Ordering is optional
+
+By default the app does **not** place orders: you order in each vendor's own app and log the delivery here (Receiving → **Log a delivery** → pick the vendor → scan the invoice or tick the items that arrived → enter quantities and prices → post). Stock, average cost and price history update when the delivery is posted. Suggested orders and purchase orders can be switched on in **Administration → How you order** (organization setting `ordering_enabled`).
 
 ## Running locally
 

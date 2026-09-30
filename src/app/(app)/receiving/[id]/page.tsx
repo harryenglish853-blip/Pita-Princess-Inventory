@@ -21,10 +21,11 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
   ]);
   if (!r) notFound();
   const vendor = r.vendor as { id: string; name: string };
-  const [{ data: storages }, { data: guide }, { data: placements }] = await Promise.all([
+  const [{ data: storages }, { data: guide }, { data: placements }, { data: allProducts }] = await Promise.all([
     supabase.from("storage_locations").select("id, name").eq("location_id", r.location_id).eq("active", true).order("sort_order"),
     supabase.from("vendor_products").select("id, product_id, vendor_item_number, product:products(id, name)").eq("vendor_id", vendor.id).eq("active", true),
     supabase.from("product_storage_locations").select("product_id, storage_location_id, sort_order").eq("location_id", r.location_id).eq("active", true),
+    supabase.from("products").select("id, name").eq("active", true).order("name"),
   ]);
   const lines: RLine[] = (items ?? []).map((i) => {
     const p = i.product as { name: string; product_number: string; catch_weight: boolean; lot_tracked: boolean; inventory_unit: { code: string } };
@@ -47,8 +48,8 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
   return (
     <>
       <PageHeader back={{ href: "/receiving", label: "Receiving" }}
-        title={`Receive ${vendor.name}`}
-        subtitle={<><StatusBadge status={r.status} label={r.status === "draft" ? "Receiving" : r.status === "received" ? "Awaiting reconciliation" : undefined} /> {r.receipt_number}{po ? <> · <Link className="text-brand" href={`/purchasing/${po.id}`}>{po.po_number}</Link></> : " · no purchase order"}{r.received_at ? ` · received ${dateTimeFmt(r.received_at)} by ${(r.receiver as { full_name: string } | null)?.full_name ?? ""}` : ""}{r.posted_at ? ` · posted ${dateTimeFmt(r.posted_at)} by ${(r.poster as { full_name: string } | null)?.full_name ?? ""}` : ""}{r.override_reason ? ` · override: ${r.override_reason}` : ""}</>}
+        title={po ? `Receive ${vendor.name}` : `${vendor.name} delivery`}
+        subtitle={<><StatusBadge status={r.status} label={r.status === "draft" ? "Receiving" : r.status === "received" ? "Awaiting reconciliation" : undefined} /> {r.receipt_number}{po ? <> · <Link className="text-brand" href={`/purchasing/${po.id}`}>{po.po_number}</Link></> : null}{r.received_at ? ` · received ${dateTimeFmt(r.received_at)} by ${(r.receiver as { full_name: string } | null)?.full_name ?? ""}` : ""}{r.posted_at ? ` · posted ${dateTimeFmt(r.posted_at)} by ${(r.poster as { full_name: string } | null)?.full_name ?? ""}` : ""}{r.override_reason ? ` · override: ${r.override_reason}` : ""}</>}
         actions={<PrintButton />} />
       <ReceiveScreen
         key={`${r.updated_at}-${lines.length}`}
@@ -56,6 +57,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
         initialHeader={{ delivery_date: s(r.delivery_date), invoice_number: s(r.invoice_number), invoice_date: s(r.invoice_date), invoice_total: s(r.invoice_total),
           tax: s(r.tax), freight: s(r.freight), fuel_surcharge: s(r.fuel_surcharge), misc_fees: s(r.misc_fees), credits: s(r.credits), notes: s(r.notes) }}
         initialLines={lines} initialTotals={totals as ReceiptTotals} storages={storages ?? []} products={products}
+        otherProducts={(allProducts ?? []).filter((x) => !products.some((g) => g.id === x.id))}
         canReceive={can(ctx, "orders.receive")} canReconcile={can(ctx, "orders.reconcile")} canOverride={can(ctx, "orders.reconcile_override")}
       />
     </>

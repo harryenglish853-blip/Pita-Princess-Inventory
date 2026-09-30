@@ -8,10 +8,14 @@ import type { ExtractedInvoice } from "@/lib/ai/invoice-extract";
 import { scanInvoice } from "../actions";
 
 type Line = { id: string; product_name: string; vendor_item_number: string | null; unit_code: string };
+/** Vendor items not on the receipt yet; an invoice line matched to one is added as a new line. */
+type CatalogItem = { id: string; name: string; vendor_product_id: string | null; vendor_item_number: string | null };
 export type ScanApply = {
   header: Partial<Record<"invoice_number" | "invoice_date" | "invoice_total" | "tax" | "freight" | "fuel_surcharge" | "misc_fees" | "credits", string>>;
   lines: { id: string; invoiced_qty: number | null; invoice_price: number | null }[];
+  newLines: { product_id: string; vendor_product_id: string | null; invoiced_qty: number | null; invoice_price: number | null }[];
 };
+const NEW = "new:";
 
 async function shrink(file: File): Promise<File> {
   if (!file.type.startsWith("image/")) return file;
@@ -25,7 +29,8 @@ async function shrink(file: File): Promise<File> {
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-function autoMatch(ex: ExtractedInvoice["lines"][number], lines: Line[]): string {
+type Candidate = { id: string; product_name: string; vendor_item_number: string | null };
+function autoMatch(ex: ExtractedInvoice["lines"][number], lines: Candidate[]): string {
   if (ex.vendor_item_number) {
     const m = lines.find((l) => l.vendor_item_number && norm(l.vendor_item_number) === norm(ex.vendor_item_number!));
     if (m) return m.id;
@@ -41,7 +46,13 @@ function autoMatch(ex: ExtractedInvoice["lines"][number], lines: Line[]): string
 }
 
 /** Photo/PDF -> AI extraction -> side-by-side review -> apply to the (unsaved) receipt. Nothing is saved or posted here. */
-export function InvoiceScanner({ receiptId, lines, onApply }: { receiptId: string; lines: Line[]; onApply: (a: ScanApply) => void }) {
+export function InvoiceScanner({ receiptId, lines, catalog = [], onApply }: { receiptId: string; lines: Line[]; catalog?: CatalogItem[]; onApply: (a: ScanApply) => void }) {
+  const onReceipt = new Set(lines.map((l) => l.product_name));
+  const addable = catalog.filter((c) => !onReceipt.has(c.name));
+  const candidates: Candidate[] = [
+    ...lines,
+    ...addable.map((c) => ({ id: NEW + c.id, product_name: c.name, vendor_item_number: c.vendor_item_number })),
+  ];
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +68,13 @@ export function InvoiceScanner({ receiptId, lines, onApply }: { receiptId: strin
       const r = await scanInvoice(receiptId, fd);
       if (!r?.ok) { setError(r?.error ?? "Could not read the invoice"); return; }
       setInv(r.data!.invoice);
-      setMatch(r.data!.invoice.lines.map((l) => autoMatch(l, lines)));
+      // Each receipt line / vendor item is matched at most once
+      const used = new Set<string>();
+      setMatch(r.data!.invoice.lines.map((l) => {
+        const m = autoMatch(l, candidates.filter((c) => !used.has(c.id)));
+        if (m) used.add(m);
+        return m;
+      }));
     });
   }
   function apply() {
@@ -66,7 +83,12 @@ export function InvoiceScanner({ receiptId, lines, onApply }: { receiptId: strin
     onApply({
       header: { invoice_number: s(inv.invoice_number), invoice_date: s(inv.invoice_date), invoice_total: s(inv.total), tax: s(inv.tax),
                 freight: s(inv.freight), fuel_surcharge: s(inv.fuel_surcharge), misc_fees: s(inv.misc_fees), credits: s(inv.credits) },
-      lines: inv.lines.map((l, i) => ({ id: match[i], invoiced_qty: l.quantity, invoice_price: l.unit_price })).filter((l) => l.id),
+      lines: inv.lines.map((l, i) => ({ id: match[i], invoiced_qty: l.quantity, invoice_price: l.unit_price })).filter((l) => l.id && !l.id.startsWith(NEW)),
+      newLines: inv.lines.flatMap((l, i) => {
+        if (!match[i]?.startsWith(NEW)) return [];
+        const c = addable.find((x) => x.id === match[i].slice(NEW.length));
+        return c ? [{ product_id: c.id, vendor_product_id: c.vendor_product_id, invoiced_qty: l.quantity, invoice_price: l.unit_price }] : [];
+      }),
     });
     setOpen(false);
   }
@@ -102,14 +124,16 @@ export function InvoiceScanner({ receiptId, lines, onApply }: { receiptId: strin
                       <td className="num">{l.quantity ?? "—"}</td><td className="num">{money(l.unit_price)}</td><td className="num">{money(l.extended_price)}</td>
                       <td>
                         <select aria-label={`Match ${l.description}`} value={match[i] ?? ""} onChange={(e) => setMatch((m) => m.map((x, j) => (j === i ? e.target.value : x)))} className={cx(inputBase, "h-8 max-w-52 text-xs")}>
-                          <option value="">Not matched</option>{lines.map((r) => <option key={r.id} value={r.id}>{r.product_name}</option>)}
+                          <option value="">Not matched</option>
+                          {lines.length ? <optgroup label="On this receipt">{lines.map((r) => <option key={r.id} value={r.id}>{r.product_name}</option>)}</optgroup> : null}
+                          {addable.length ? <optgroup label="Add from vendor items">{addable.map((c) => <option key={c.id} value={NEW + c.id}>{c.name}</option>)}</optgroup> : null}
                         </select>
                       </td>
                     </tr>
                   ))}</tbody>
                 </table>
               </div>
-              {unmatched ? <p className="text-xs text-warning">{unmatched} line(s) are not matched. Add them as extra items on the receipt if they were delivered.</p> : null}
+              {unmatched ? <p className="text-xs text-warning">{unmatched} line(s) are not matched. Pick the product, or add it to this vendor's items first.</p> : null}
               <div className="flex items-center justify-between">
                 <Badge tone="info">AI-read · review required</Badge>
                 <Button variant="primary" onClick={apply}>Apply to receipt (not saved yet)</Button>

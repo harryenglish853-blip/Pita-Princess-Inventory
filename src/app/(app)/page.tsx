@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { requireContext, can } from "@/lib/session";
+import { requireContext, can, orderingEnabled } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 import { ActionButton } from "@/components/client";
 import { Badge, Card, LinkButton, Notice, PageHeader, Stat } from "@/components/ui";
 import { dateFmt, money, pct, qty } from "@/lib/format";
-import { ClipboardList, Trash2, Truck, ShoppingCart } from "lucide-react";
+import { Boxes, ClipboardList, Trash2, Truck, ShoppingCart } from "lucide-react";
 import { ackAlert } from "./tasks/actions";
 import { Scorecard } from "./scorecard";
 
@@ -28,6 +28,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const corporate = ctx.locations.length > 1 && ctx.locations.some((l) => l.permissions.includes("reports.view_corporate"));
   const yest = k.sales_yesterday as K | null;
   const fcToday = k.forecast_today as K;
+  const ordering = orderingEnabled(ctx);
   const wasteWeekPct = Number(k.sales_7d) ? (Number(k.waste_7d) / Number(k.sales_7d)) * 100 : null;
 
   return (
@@ -36,9 +37,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
       <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {can(ctx, "inventory.count") ? <QuickAction href="/counts" icon={<ClipboardList className="h-6 w-6" />} label="Count inventory" sub={k.open_counts ? `${k.open_counts} open` : undefined} /> : null}
-        {can(ctx, "orders.receive") ? <QuickAction href="/receiving" icon={<Truck className="h-6 w-6" />} label="Receive delivery" sub={k.pending_deliveries ? `${k.pending_deliveries} expected` : undefined} /> : null}
+        {can(ctx, "orders.receive") ? <QuickAction href="/receiving" icon={<Truck className="h-6 w-6" />} label={ordering ? "Receive delivery" : "Log a delivery"} sub={ordering && k.pending_deliveries ? `${k.pending_deliveries} expected` : undefined} /> : null}
         {can(ctx, "waste.log") ? <QuickAction href="/waste" icon={<Trash2 className="h-6 w-6" />} label="Log waste" /> : null}
-        {can(ctx, "orders.create") ? <QuickAction href="/purchasing" icon={<ShoppingCart className="h-6 w-6" />} label="What should I order?" /> : null}
+        {ordering && can(ctx, "orders.create") ? <QuickAction href="/purchasing" icon={<ShoppingCart className="h-6 w-6" />} label="What should I order?" /> : null}
+        {!ordering && can(ctx, "inventory.view") ? <QuickAction href="/inventory" icon={<Boxes className="h-6 w-6" />} label="Stock on hand" sub={k.stock.low + k.stock.critical ? `${k.stock.low + k.stock.critical} running low` : undefined} /> : null}
       </div>
 
       {cost ? (
@@ -57,12 +59,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card title="Needs attention" className="lg:col-span-2" padded={false}>
-          <div className="grid grid-cols-2 gap-px border-b border-border bg-border sm:grid-cols-4">
+          <div className={`grid grid-cols-2 gap-px border-b border-border bg-border ${ordering ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
             <Attn label="Low / critical" value={`${k.stock.low} / ${k.stock.critical}`} href="/inventory" tone={k.stock.critical ? "danger" : k.stock.low ? "warning" : undefined} />
             <Attn label="Out / negative" value={`${k.stock.out} / ${k.stock.negative}`} href="/inventory" tone={k.stock.out + k.stock.negative ? "danger" : undefined} />
-            <Attn label="Deliveries pending (late)" value={`${k.pending_deliveries} (${k.late_deliveries})`} href="/receiving" tone={k.late_deliveries ? "danger" : undefined} />
+            {ordering ? <Attn label="Deliveries pending (late)" value={`${k.pending_deliveries} (${k.late_deliveries})`} href="/receiving" tone={k.late_deliveries ? "danger" : undefined} /> : null}
             <Attn label="Invoices to reconcile" value={k.to_reconcile} href="/receiving" tone={k.to_reconcile ? "warning" : undefined} />
-            <Attn label="Draft orders" value={k.open_pos} href="/purchasing" />
+            {ordering ? <Attn label="Draft orders" value={k.open_pos} href="/purchasing" /> : null}
             <Attn label="Open counts" value={k.open_counts} href="/counts" />
             <Attn label="Tasks due today" value={k.tasks.due_today} href="/tasks" tone={k.tasks.due_today ? "warning" : undefined} />
             <Attn label="Overdue tasks" value={k.tasks.overdue} href="/tasks" tone={k.tasks.overdue ? "danger" : undefined} />

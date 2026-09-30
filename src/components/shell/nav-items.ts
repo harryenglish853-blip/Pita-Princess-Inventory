@@ -1,6 +1,6 @@
 import type { Permission } from "@/lib/permissions";
 
-export type NavItem = { href: string; label: string; icon: string; perm?: Permission; section: string };
+export type NavItem = { href: string; label: string; icon: string; perm?: Permission; section: string; feature?: "ordering" };
 
 export const NAV: NavItem[] = [
   { href: "/", label: "Overview", icon: "home", section: "Operations" },
@@ -10,7 +10,7 @@ export const NAV: NavItem[] = [
   { href: "/waste", label: "Waste", icon: "trash", perm: "waste.log", section: "Inventory" },
   { href: "/transfers", label: "Transfers", icon: "shuffle", perm: "inventory.view", section: "Inventory" },
   { href: "/inventory/storage", label: "Storage & Shelf Order", icon: "layers", perm: "inventory.view", section: "Inventory" },
-  { href: "/purchasing", label: "Purchasing", icon: "cart", perm: "orders.view", section: "Purchasing" },
+  { href: "/purchasing", label: "Purchasing", icon: "cart", perm: "orders.view", section: "Purchasing", feature: "ordering" },
   { href: "/receiving", label: "Receiving", icon: "truck", perm: "orders.receive", section: "Purchasing" },
   { href: "/vendors", label: "Vendors", icon: "store", perm: "orders.view", section: "Purchasing" },
   { href: "/recipes", label: "Recipes & Menu", icon: "chef", perm: "recipes.view", section: "Kitchen" },
