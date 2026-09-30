@@ -42,6 +42,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 export const useToast = () => useContext(ToastCtx);
 
 // ---------------------------------------------------------------- Forms
+/** Redirect targets may contain {field} placeholders filled from the action's returned data (e.g. "/receiving/{id}"). */
+function resolveRedirect<T>(target: string | ((d: T | undefined) => string), data: T | undefined): string {
+  if (typeof target === "function") return target(data);
+  return target.replace(/\{(\w+)\}/g, (_, k) => encodeURIComponent(String((data as Record<string, unknown> | undefined)?.[k] ?? "")));
+}
+
 export function SubmitButton({ children, variant = "primary", size = "md", className, pendingText, disabled }: {
   children: ReactNode; variant?: "primary" | "secondary" | "danger" | "success" | "ghost"; size?: "sm" | "md" | "lg"; className?: string; pendingText?: string; disabled?: boolean;
 }) {
@@ -75,7 +81,7 @@ export function ActionForm<T>({ action, children, className, successMessage, red
       if (resetOnSuccess) formRef.current?.reset();
       onSuccess?.(state.data as T);
       closeModal?.();
-      if (redirectTo) router.push(typeof redirectTo === "function" ? redirectTo(state.data as T) : redirectTo);
+      if (redirectTo) router.push(resolveRedirect(redirectTo, state.data as T));
       else if (refresh) router.refresh();
     } else if (state.error) {
       toast({ tone: "error", text: state.error });
@@ -126,7 +132,7 @@ export function ActionButton<T>({ action, children, confirm, confirmLabel = "Con
         setOpen(false);
         const msg = res.message ?? successMessage;
         if (msg) toast({ tone: "success", text: msg });
-        if (redirectTo) router.push(typeof redirectTo === "function" ? redirectTo(res.data as T) : redirectTo);
+        if (redirectTo) router.push(resolveRedirect(redirectTo, res.data as T));
         else router.refresh();
       } else {
         const msg = res?.error ?? "Something went wrong";

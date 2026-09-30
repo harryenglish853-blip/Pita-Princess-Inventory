@@ -11,7 +11,7 @@ export default async function NewVendorPage() {
   return (
     <>
       <PageHeader title="New vendor" back={{ href: "/vendors", label: "Vendors" }} />
-      <ActionForm action={saveVendor.bind(null, null)} redirectTo={(d) => `/vendors/${(d as { id: string }).id}`}>
+      <ActionForm action={saveVendor.bind(null, null)} redirectTo="/vendors/{id}">
         <Card><VendorFields vendor={null} /></Card>
         <div className="mt-4 flex justify-end"><SubmitButton>Create vendor</SubmitButton></div>
       </ActionForm>

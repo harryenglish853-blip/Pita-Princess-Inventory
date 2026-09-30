@@ -30,7 +30,7 @@ export function StartCount({ storages, categories }: { storages: { id: string; n
     <>
       <Button variant="primary" size="lg" onClick={() => setOpen(true)}>Start count</Button>
       <Modal open={open} onClose={() => setOpen(false)} title="Start a count">
-        <ActionForm action={createCount} redirectTo={(d) => `/counts/${(d as { id: string }).id}`} className="space-y-4">
+        <ActionForm action={createCount} redirectTo="/counts/{id}" className="space-y-4">
           <input type="hidden" name="client_key" value={key} />
           <div className="grid grid-cols-2 gap-2">
             {TYPES.map(([v, l, d]) => (

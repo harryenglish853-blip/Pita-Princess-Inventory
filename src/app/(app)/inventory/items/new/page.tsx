@@ -24,7 +24,7 @@ export default async function NewProductPage() {
   return (
     <>
       <PageHeader title="New product" back={{ href: "/inventory", label: "Inventory" }} subtitle="Corporate master record. It becomes available at every location." />
-      <ActionForm action={createProduct} redirectTo={(d) => `/inventory/items/${(d as { id: string }).id}`} className="space-y-4">
+      <ActionForm action={createProduct} redirectTo="/inventory/items/{id}" className="space-y-4">
         <Card title="Product">
           <ProductMasterFields product={{ product_number: suggested }} units={units.data ?? []} categories={cats.data ?? []} vendors={(vendors.data ?? []).map((v) => ({ id: v.id, label: v.name }))} />
         </Card>
