@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+/* Design tokens. Neutral, high-contrast operational palette with a deep teal accent. */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #f0f2f5;
+  --border: #dde1e7;
+  --border-strong: #c3c9d2;
+  --text: #111827;
+  --muted: #5b6472;
+  --brand: #0f6e66;
+  --brand-strong: #0b5550;
+  --brand-soft: #e3f2f0;
+  --danger: #b42318;
+  --danger-soft: #fdecea;
+  --warning: #9a6200;
+  --warning-soft: #fff4dc;
+  --success: #117a3e;
+  --success-soft: #e5f5ea;
+  --info: #1d5fb8;
+  --info-soft: #e7f0fb;
+  --focus: #1d7fe0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1116;
+    --surface: #161a21;
+    --surface-2: #1d222b;
+    --border: #2a303b;
+    --border-strong: #3a4250;
+    --text: #e8ebf0;
+    --muted: #9aa3b2;
+    --brand: #2bb3a3;
+    --brand-strong: #52c9bb;
+    --brand-soft: #12332f;
+    --danger: #ff6b5e;
+    --danger-soft: #3a1714;
+    --warning: #f0b64d;
+    --warning-soft: #372a10;
+    --success: #4fd08a;
+    --success-soft: #11301f;
+    --info: #74a9f0;
+    --info-soft: #14253d;
+    --focus: #74a9f0;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-soft: var(--brand-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+  font-feature-settings: "tnum" 1; /* tabular numbers for columns of quantities and money */
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+
+/* Data tables */
+.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.875rem; }
+.tbl th { position: sticky; top: 0; z-index: 1; background: var(--surface-2); color: var(--muted); font-weight: 600; font-size: 0.75rem;
+  text-transform: uppercase; letter-spacing: 0.02em; text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.tbl td { padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.tbl tbody tr:hover td { background: var(--surface-2); }
+.tbl th.num, .tbl td.num { text-align: right; }
+
+input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+
+dialog::backdrop { background: rgb(0 0 0 / 0.45); }
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: #fff; color: #000; }
+  .print-full { overflow: visible !important; max-height: none !important; }
+}

@@ -1,0 +1,346 @@
+-- =====================================================================
+-- DEMO ENVIRONMENT — "Demo Restaurant #101"
+-- Every quantity, cost and variance below is produced by calling the same
+-- database functions the app uses (receipts, counts, orders), impersonating
+-- demo users, so all KPIs trace back to real ledger transactions.
+-- Demo logins (password: Demo1234!):
+--   owner@example.com (System Owner)       gm@example.com (General Manager #101)
+--   kitchen@example.com (Kitchen Manager)  maria@example.com / john@example.com / carlos@example.com (Employees)
+--   accounting@example.com (Accounting)    regional@example.com (Regional Manager)
+-- Do NOT run this against a production database.
+-- =====================================================================
+create extension if not exists pgcrypto with schema extensions;
+
+create schema if not exists seed;
+
+create or replace function seed.user(p_email text, p_name text) returns uuid
+language plpgsql as $$
+declare v uuid;
+begin
+  select id into v from auth.users where email = p_email;
+  if v is not null then return v; end if;
+  v := gen_random_uuid();
+  insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+                          created_at, updated_at, confirmation_token, recovery_token, email_change_token_new, email_change)
+  values ('00000000-0000-0000-0000-000000000000', v, 'authenticated', 'authenticated', p_email,
+          extensions.crypt('Demo1234!', extensions.gen_salt('bf')), now(),
+          '{"provider":"email","providers":["email"]}', jsonb_build_object('full_name', p_name), now(), now(), '', '', '', '');
+  insert into auth.identities (provider_id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
+  values (v::text, v, jsonb_build_object('sub', v::text, 'email', p_email, 'email_verified', true), 'email', now(), now(), now());
+  return v;
+end $$;
+
+create or replace function seed.as_user(p_user uuid) returns void
+language plpgsql as $$
+begin
+  perform set_config('request.jwt.claims', json_build_object('sub', p_user, 'role', 'authenticated')::text, true);
+  perform set_config('role', 'authenticated', true);
+end $$;
+
+create or replace function seed.as_admin() returns void
+language plpgsql as $$
+begin
+  perform set_config('role', 'postgres', true);
+end $$;
+
+-- deterministic pseudo-random in [0,1) so the demo is reproducible
+create or replace function seed.rnd(p_key text) returns numeric
+language sql immutable as $$ select (('x' || substr(md5(p_key), 1, 8))::bit(32)::bigint % 10000)::numeric / 10000 $$;
+
+grant usage on schema seed to authenticated;
+grant execute on all functions in schema seed to authenticated;
+
+-- Product catalog spec for the demo
+create temporary table seed_products (
+  num text, name text, cat text, sub text, inv_unit text, recipe_unit text,
+  pu text, pu_factor numeric, alt_unit text, alt_factor numeric,
+  vendor text, sku text, pack text, price numeric,
+  weekly_usage numeric, par numeric, storage text, shelf text, line_storage boolean,
+  temp_max numeric, daily boolean, price_path numeric[]
+) on commit drop;
+
+insert into seed_products values
+ ('1001','Chicken Breast, Boneless','Food','Protein','LB','OZ','CASE',40,null,null,'US Foods','48219','4/10 LB',128.00,110,120,'Walk-In Cooler','Shelf 2',true,41,true,'{0.856,0.878,0.925,1}'),
+ ('1002','Ground Beef 80/20','Food','Protein','LB','OZ','CASE',20,null,null,'US Foods','51127','4/5 LB',89.00,70,80,'Walk-In Cooler','Shelf 2',true,41,true,'{0.97,0.98,0.99,1}'),
+ ('1003','Salmon Fillet, Atlantic','Food','Seafood','LB','OZ','CASE',10,null,null,'Sysco','7731045','10 LB',129.00,18,20,'Walk-In Cooler','Shelf 2',false,41,true,'{1,1,1.02,1}'),
+ ('1004','Shrimp 16/20 IQF','Food','Seafood','LB','OZ','CASE',10,'BAG',2,'Sysco','5520811','5/2 LB',95.00,12,15,'Walk-In Freezer','Shelf 1',false,10,false,'{1,1,1,1}'),
+ ('1005','Bacon, Sliced','Food','Protein','LB','OZ','CASE',15,null,null,'US Foods','33902','15 LB',78.00,20,20,'Walk-In Cooler','Shelf 2',false,41,false,'{0.95,0.97,1,1}'),
+ ('2001','Avocado, Hass','Food','Produce','EA','EA','CASE',48,null,null,'Local Produce Company','AV48','48 CT',47.00,150,120,'Walk-In Cooler','Shelf 3',false,null,true,'{0.9,0.95,1.04,1}'),
+ ('2002','Tomatoes, 5x6','Food','Produce','LB','OZ','CASE',25,null,null,'Local Produce Company','TM25','25 LB',32.00,60,50,'Walk-In Cooler','Shelf 3',true,null,true,'{1,1.03,1,1}'),
+ ('2003','Lettuce, Romaine','Food','Produce','EA','EA','CASE',24,null,null,'Local Produce Company','RM24','24 CT',36.00,40,36,'Walk-In Cooler','Shelf 3',true,null,true,'{1,1,1,1}'),
+ ('2004','Onions, Yellow Jumbo','Food','Produce','LB','OZ','BAG',50,null,null,'Local Produce Company','ON50','50 LB',28.00,45,50,'Dry Storage A','Rack 1',false,null,false,'{1,1,1,1}'),
+ ('3001','Cheddar, Sliced','Food','Dairy','LB','OZ','CASE',20,null,null,'US Foods','66120','4/5 LB',74.00,25,25,'Walk-In Cooler','Shelf 1',true,41,false,'{1,1,1,1}'),
+ ('3002','Mozzarella, Shredded','Food','Dairy','LB','OZ','CASE',20,'BAG',5,'US Foods','66145','4/5 LB',66.00,22,20,'Walk-In Cooler','Shelf 1',false,41,false,'{1,1,1,1}'),
+ ('3003','Heavy Cream','Food','Dairy','QT','FL OZ','CASE',12,'CTN',1,'US Foods','70012','12/1 QT',52.00,14,12,'Walk-In Cooler','Shelf 1',false,41,false,'{0.96,1,1,1}'),
+ ('3004','Butter, Unsalted','Food','Dairy','LB','OZ','CASE',36,null,null,'US Foods','70301','36/1 LB',118.00,10,12,'Walk-In Cooler','Shelf 1',false,41,false,'{1,1,1,1}'),
+ ('4001','French Fries 3/8"','Food','Frozen','LB','OZ','CASE',30,'BAG',5,'US Foods','11248','6/5 LB',38.50,90,90,'Walk-In Freezer','Shelf 2',false,10,false,'{1,1,1,1}'),
+ ('4002','Burger Buns, Brioche','Food','Bakery','EA','EA','CASE',96,'PK',8,'US Foods','20488','12/8 CT',28.00,300,240,'Dry Storage A','Rack 2',false,null,false,'{1,1,1,1}'),
+ ('4003','Flour, All Purpose','Food','Dry Goods','LB','OZ','BAG',50,null,null,'Sysco','4412030','50 LB',22.00,25,50,'Dry Storage A','Rack 3',false,null,false,'{1,1,1,1}'),
+ ('4004','Rice, Long Grain','Food','Dry Goods','LB','OZ','BAG',25,null,null,'Sysco','4415501','25 LB',24.00,20,25,'Dry Storage A','Rack 3',false,null,false,'{1,1,1,1}'),
+ ('4005','Fryer Oil, Soybean','Food','Dry Goods','LB','OZ','JUG',35,null,null,'Sysco','6600352','35 LB',46.00,40,35,'Dry Storage B','Floor',false,null,false,'{0.93,0.96,1,1}'),
+ ('5001','Coca-Cola 12 oz Can','Beverage','Soft Drinks','EA','EA','CASE',24,null,null,'Beverage Distributor','CK12','24/12 OZ',15.00,120,96,'Beer Cooler','Top',false,null,false,'{1,1,1,1}'),
+ ('5002','Sprite 12 oz Can','Beverage','Soft Drinks','EA','EA','CASE',24,null,null,'Beverage Distributor','SP12','24/12 OZ',15.00,60,48,'Beer Cooler','Top',false,null,false,'{1,1,1,1}'),
+ ('5003','Draft IPA, Local','Alcohol','Beer','GAL','FL OZ','KEG',15.5,null,null,'Beverage Distributor','IPA-HB','1/2 BBL',165.00,15,15.5,'Beer Cooler','Floor',false,null,false,'{1,1,1,1}'),
+ ('5004','House Cabernet Sauvignon','Alcohol','Wine','BTL','BTL','CASE',12,null,null,'Beverage Distributor','CAB750','12/750 ML',120.00,18,24,'Liquor Storage','Rack A',false,null,false,'{1,1,1,1}'),
+ ('6001','Napkins, Dinner','Paper','Disposables','PK','PK','CASE',12,null,null,'US Foods','90011','12/500 CT',45.00,6,8,'Front Storage','Shelf 1',false,null,false,'{1,1,1,1}'),
+ ('6002','To-Go Container 9x9','Paper','Disposables','EA','EA','CASE',200,null,null,'US Foods','90450','200 CT',54.00,250,200,'Front Storage','Shelf 2',false,null,false,'{1,1,1,1}'),
+ ('6003','Gloves, Nitrile Large','Supplies','Kitchen Supplies','BOX','BOX','CASE',10,null,null,'Sysco','8800123','10/100 CT',62.00,6,6,'Front Storage','Shelf 3',false,null,false,'{1,1,1,1}'),
+ ('6004','Sanitizer, Quaternary','Supplies','Chemicals','GAL','FL OZ','CASE',4,null,null,'Sysco','8812007','4/1 GAL',58.00,2,4,'Chemical Storage','Shelf 1',false,null,false,'{1,1,1,1}');
+
+grant select on seed_products to authenticated;
+
+do $$
+declare
+  v_owner uuid := seed.user('owner@example.com', 'Harry Owner');
+  v_gm uuid := seed.user('gm@example.com', 'Gina Manager');
+  v_km uuid := seed.user('kitchen@example.com', 'Kevin Kitchen');
+  v_maria uuid := seed.user('maria@example.com', 'Maria Lopez');
+  v_john uuid := seed.user('john@example.com', 'John Carter');
+  v_carlos uuid := seed.user('carlos@example.com', 'Carlos Ruiz');
+  v_acct uuid := seed.user('accounting@example.com', 'Alex Accounting');
+  v_reg uuid := seed.user('regional@example.com', 'Rita Regional');
+  v_org uuid; v_loc uuid; v_loc2 uuid; v_region uuid; v_district uuid;
+  p record; v record; s record;
+  v_cat_top uuid; v_cat uuid; v_pid uuid; v_vendor uuid; v_storage uuid;
+  v_week int; v_day date; v_po uuid; v_rcv uuid; v_cnt uuid;
+  v_lines jsonb; v_entries jsonb; v_qty numeric; v_book numeric; v_price numeric;
+  v_sunday date := (current_date - extract(dow from current_date)::int);  -- most recent Sunday
+  v_open date;
+  v_counter uuid;
+  v_i int;
+begin
+  -- ---------------------------------------------------------------- organization
+  perform seed.as_user(v_owner);
+  v_org := public.create_organization('Pita Princess Restaurant Group', 'Demo Restaurant', '101', 'America/New_York');
+  select id into v_loc from public.locations where organization_id = v_org and code = '101';
+  update public.locations set address_line1 = '101 Main Street', city = 'Springfield', state = 'IL', phone = '(555) 010-0101' where id = v_loc;
+  insert into public.regions (organization_id, name, code) values (v_org, 'Midwest', 'MW') returning id into v_region;
+  insert into public.districts (organization_id, region_id, name, code) values (v_org, v_region, 'Springfield District', 'SPR') returning id into v_district;
+  update public.locations set region_id = v_region, district_id = v_district, market = 'Springfield' where id = v_loc;
+  insert into public.locations (organization_id, region_id, district_id, market, code, name, timezone, address_line1, city, state)
+    values (v_org, v_region, v_district, 'Springfield', '105', 'Demo Restaurant Westside', 'America/New_York', '505 West Ave', 'Springfield', 'IL')
+    returning id into v_loc2;
+
+  perform public.assign_role(v_org, v_gm, 'general_manager', 'location', v_loc);
+  perform public.assign_role(v_org, v_km, 'kitchen_manager', 'location', v_loc);
+  perform public.assign_role(v_org, v_maria, 'employee', 'location', v_loc);
+  perform public.assign_role(v_org, v_john, 'employee', 'location', v_loc);
+  perform public.assign_role(v_org, v_carlos, 'employee', 'location', v_loc);
+  perform public.assign_role(v_org, v_acct, 'accounting', 'organization', v_org);
+  perform public.assign_role(v_org, v_reg, 'regional_manager', 'region', v_region);
+  update public.profiles set default_location_id = v_loc where id in (v_gm, v_km, v_maria, v_john, v_carlos, v_acct, v_reg);
+
+  -- ---------------------------------------------------------------- vendors
+  insert into public.vendors (organization_id, name, vendor_number, account_number, sales_rep, phone, email, ordering_email, edi_enabled, einvoice_enabled,
+                              order_website, delivery_days, lead_time_days, order_cutoff, minimum_order, freight_rules, payment_terms) values
+    (v_org, 'US Foods', 'USF-100', '4410-2231', 'Dana Whitfield', '(555) 300-1000', 'dana.whitfield@example.com', 'orders@example.com', true, true, 'https://order.example.com/usfoods', '{2,5}', 1, '15:00', 350, 'Free over $350; $35 fee below', 'Net 14'),
+    (v_org, 'Sysco', 'SYS-200', 'SY-88213', 'Marcus Lee', '(555) 300-2000', 'marcus.lee@example.com', 'orders@example.com', true, true, 'https://order.example.com/sysco', '{1,4}', 1, '14:00', 300, 'Free over $300', 'Net 21'),
+    (v_org, 'Local Produce Company', 'LPC-300', 'LP-0101', 'Sam Greene', '(555) 300-3000', 'sam@example.com', 'orders@example.com', false, false, null, '{1,3,5}', 1, '17:00', 75, 'No freight charge', 'COD'),
+    (v_org, 'Beverage Distributor', 'BEV-400', 'BD-5510', 'Priya Patel', '(555) 300-4000', 'priya@example.com', 'orders@example.com', false, true, null, '{2}', 2, '12:00', 150, 'Free', 'Net 30');
+
+  -- ---------------------------------------------------------------- storage areas (#101) in walking order
+  insert into public.storage_locations (organization_id, location_id, name, kind, sort_order) values
+    (v_org, v_loc, 'Walk-In Cooler', 'walk_in_cooler', 1), (v_org, v_loc, 'Walk-In Freezer', 'walk_in_freezer', 2),
+    (v_org, v_loc, 'Line Cooler', 'line', 3), (v_org, v_loc, 'Dry Storage A', 'dry_storage', 4), (v_org, v_loc, 'Dry Storage B', 'dry_storage', 5),
+    (v_org, v_loc, 'Beer Cooler', 'beverage', 6), (v_org, v_loc, 'Liquor Storage', 'bar', 7), (v_org, v_loc, 'Front Storage', 'front', 8),
+    (v_org, v_loc, 'Chemical Storage', 'chemical', 9);
+  insert into public.storage_locations (organization_id, location_id, name, kind, sort_order)
+    select v_org, v_loc2, name, kind, sort_order from public.storage_locations where location_id = v_loc;
+
+  -- ---------------------------------------------------------------- categories & products
+  for p in select * from seed_products loop
+    select id into v_cat_top from public.categories where organization_id = v_org and parent_id is null and name = p.cat;
+    if v_cat_top is null then
+      insert into public.categories (organization_id, name, cost_group, is_food, sort)
+        values (v_org, p.cat, lower(p.cat)::text, p.cat = 'Food', (select count(*) from public.categories where organization_id = v_org and parent_id is null))
+        returning id into v_cat_top;
+    end if;
+    select id into v_cat from public.categories where organization_id = v_org and parent_id = v_cat_top and name = p.sub;
+    if v_cat is null then
+      insert into public.categories (organization_id, parent_id, name, cost_group, is_food) values (v_org, v_cat_top, p.sub, lower(p.cat), p.cat = 'Food') returning id into v_cat;
+    end if;
+    select id into v_vendor from public.vendors where organization_id = v_org and name = p.vendor;
+    insert into public.products (organization_id, product_number, name, category_id, inventory_unit_id, recipe_unit_id, purchase_unit_id,
+                                 default_vendor_id, sku, receiving_temp_max, shelf_life_days, standard_cost, created_by)
+    values (v_org, p.num, p.name, v_cat,
+            (select id from public.units where code = p.inv_unit and organization_id is null),
+            (select id from public.units where code = p.recipe_unit and organization_id is null),
+            (select id from public.units where code = p.pu and organization_id is null),
+            v_vendor, 'SKU-' || p.num, p.temp_max,
+            case p.sub when 'Produce' then 7 when 'Protein' then 5 when 'Seafood' then 3 when 'Dairy' then 14 else null end,
+            round(p.price / p.pu_factor, 6), v_owner)
+    returning id into v_pid;
+    insert into public.product_units (organization_id, product_id, unit_id, factor, use_for_count, use_for_purchase, label)
+    values (v_org, v_pid, (select id from public.units where code = p.pu and organization_id is null), p.pu_factor, true, true, p.pu || ' (' || p.pack || ')');
+    if p.alt_unit is not null then
+      insert into public.product_units (organization_id, product_id, unit_id, factor, use_for_count)
+      values (v_org, v_pid, (select id from public.units where code = p.alt_unit and organization_id is null), p.alt_factor, true);
+    end if;
+    insert into public.vendor_products (organization_id, vendor_id, product_id, vendor_item_number, description, purchase_unit_id, pack_size,
+                                        current_price, is_preferred, guide_sort)
+    values (v_org, v_vendor, v_pid, p.sku, upper(p.name), (select id from public.units where code = p.pu and organization_id is null), p.pack,
+            round(p.price * p.price_path[1], 2), true, p.num::int);
+    insert into public.product_barcodes (organization_id, product_id, barcode, unit_id, vendor_id)
+    values (v_org, v_pid, '0' || lpad(p.num, 6, '0') || '12345', (select id from public.units where code = p.pu and organization_id is null), v_vendor);
+  end loop;
+
+  -- Secondary vendor for chicken and fries (vendor price comparison)
+  insert into public.vendor_products (organization_id, vendor_id, product_id, vendor_item_number, description, purchase_unit_id, pack_size, current_price, contract_price, contract_start, contract_end, guide_sort)
+  select v_org, (select id from public.vendors where organization_id = v_org and name = 'Sysco'), pp.id, 'SY-' || pp.product_number, upper(pp.name),
+         pp.purchase_unit_id, case pp.product_number when '1001' then '4/10 LB' else '6/5 LB' end,
+         case pp.product_number when '1001' then 131.50 else 39.95 end, null, null, null, 900
+  from public.products pp where pp.organization_id = v_org and pp.product_number in ('1001', '4001');
+  -- Contract price on fries at US Foods
+  update public.vendor_products set contract_price = 37.25, contract_start = current_date - 60, contract_end = current_date + 120
+  where organization_id = v_org and vendor_item_number = '11248';
+
+  -- Shelf-to-sheet order (+ local pars) for both stores
+  for s in select sl.id, sl.name, sl.location_id from public.storage_locations sl where sl.organization_id = v_org loop
+    perform public.set_storage_sequence(s.id, coalesce((
+      select jsonb_agg(jsonb_build_object('product_id', pr.id, 'shelf', sp.shelf) order by sp.shelf, sp.num)
+      from seed_products sp join public.products pr on pr.organization_id = v_org and pr.product_number = sp.num
+      where sp.storage = s.name), '[]'::jsonb));
+    if s.name = 'Line Cooler' then
+      perform public.set_storage_sequence(s.id, (
+        select jsonb_agg(jsonb_build_object('product_id', pr.id, 'shelf', 'Rail') order by sp.num)
+        from seed_products sp join public.products pr on pr.organization_id = v_org and pr.product_number = sp.num where sp.line_storage));
+    end if;
+  end loop;
+  update public.location_products lp set par_qty = sp.par, min_qty = round(sp.par * 0.25, 2), safety_stock_days = 1,
+         count_daily = sp.daily, count_weekly = true
+  from seed_products sp join public.products pr on pr.product_number = sp.num
+  where pr.organization_id = v_org and lp.product_id = pr.id;
+  update public.location_products set par_mode = 'dynamic' where product_id in (select id from public.products where organization_id = v_org and product_number in ('1001', '2001'))
+    and location_id = v_loc;
+
+  -- ---------------------------------------------------------------- history: opening count 4 weeks ago
+  v_open := v_sunday - 28;
+  perform seed.as_user(v_owner);
+  for v_i in 0..1 loop
+    v_cnt := public.create_count_session(case v_i when 0 then v_loc else v_loc2 end, 'full', 'Opening Inventory',
+                                         (v_open::timestamp + time '21:00') at time zone 'America/New_York');
+    select jsonb_agg(jsonb_build_object('client_entry_id', gen_random_uuid(), 'product_id', pr.id, 'storage_location_id', i.storage_location_id,
+                     'breakdown', jsonb_build_array(jsonb_build_object('unit_id', pr.inventory_unit_id, 'qty', round(sp.par * 0.8, 1)))))
+      into v_entries
+    from public.count_session_items i join public.products pr on pr.id = i.product_id join seed_products sp on sp.num = pr.product_number
+    where i.session_id = v_cnt
+      and i.storage_location_id = (select sl.id from public.storage_locations sl where sl.location_id = case v_i when 0 then v_loc else v_loc2 end and sl.name = sp.storage);
+    perform public.save_count_entries(v_cnt, v_entries);
+    perform public.submit_count_session(v_cnt);
+    perform public.post_count_session(v_cnt, true);
+  end loop;
+
+  -- ---------------------------------------------------------------- 4 weeks of deliveries + weekly counts at #101
+  for v_week in 1..4 loop
+    for v in select * from public.vendors where organization_id = v_org order by name loop
+      -- delivery day: the vendor's first delivery weekday in this week
+      v_day := (v_sunday - 28 + (v_week - 1) * 7) + (select min(d) from unnest(v.delivery_days) d)::int;
+      perform seed.as_user(v_km);
+      -- order what the week will use, priced on the week's price path
+      select jsonb_agg(jsonb_build_object('product_id', pr.id, 'vendor_product_id', vp.id,
+               'order_qty', greatest(1, ceil((sp.weekly_usage * (0.95 + seed.rnd(pr.id::text || v_week) * 0.15)) / sp.pu_factor)),
+               'unit_price', round(sp.price * sp.price_path[v_week], 2)))
+        into v_lines
+      from seed_products sp join public.products pr on pr.organization_id = v_org and pr.product_number = sp.num
+      join public.vendor_products vp on vp.product_id = pr.id and vp.vendor_id = v.id
+      where sp.vendor = v.name;
+      continue when v_lines is null;
+      v_po := public.create_purchase_order(v_loc, v.id, v_day, v_lines);
+      perform seed.as_admin();
+      update public.purchase_orders set order_date = v_day - 1 where id = v_po;
+      perform seed.as_user(v_km);
+      perform public.set_purchase_order_status(v_po, 'submitted', null, null, true);
+
+      perform seed.as_user(case v_week % 3 when 0 then v_maria when 1 then v_john else v_carlos end);
+      v_rcv := public.create_receipt(v_loc, null, v_po);
+      select jsonb_agg(jsonb_build_object('id', ri.id, 'received_qty', ri.ordered_qty, 'invoiced_qty', ri.ordered_qty,
+               'temperature', case when ri.temp_max is null then null when ri.temp_max < 32 then round(seed.rnd(ri.id::text) * 6, 1)
+                                   else 35 + round(seed.rnd(ri.id::text) * 4, 1) end,
+               'lot_number', case when pr.product_number in ('1001', '1002', '1003', '1004') then 'L' || to_char(v_day, 'YYMMDD') || '-' || pr.product_number end,
+               'storage_allocations', jsonb_build_array(jsonb_build_object('storage_location_id',
+                  (select sl.id from public.storage_locations sl join seed_products sp on sp.storage = sl.name where sl.location_id = v_loc and sp.num = pr.product_number),
+                  'qty', ri.ordered_qty))))
+        into v_lines
+      from public.receipt_items ri join public.products pr on pr.id = ri.product_id where ri.receipt_id = v_rcv;
+      perform public.save_receipt(v_rcv,
+        jsonb_build_object('invoice_number', upper(left(v.name, 3)) || '-' || to_char(v_day, 'YYMMDD'), 'invoice_date', v_day, 'delivery_date', v_day),
+        v_lines);
+      perform public.save_receipt(v_rcv, jsonb_build_object('invoice_total', (public.receipt_totals(v_rcv) ->> 'calculated_total')::numeric), null);
+      perform public.complete_receiving(v_rcv);
+      perform seed.as_admin();
+      update public.receipts set received_at = (v_day::timestamp + time '09:30') at time zone 'America/New_York' where id = v_rcv;
+      perform seed.as_user(v_gm);
+      perform public.post_receipt(v_rcv);
+    end loop;
+
+    -- Sunday night count: physical = book - realistic unrecorded usage (no POS data yet)
+    perform seed.as_user(v_gm);
+    v_day := v_sunday - 28 + v_week * 7;
+    v_cnt := public.create_count_session(v_loc, 'weekly', 'Weekly Count ' || to_char(v_day, 'Mon DD'),
+                                         (v_day::timestamp + time '21:00') at time zone 'America/New_York');
+    for v_counter in select unnest(array[v_maria, v_john, v_carlos]) loop
+      perform seed.as_user(v_counter);
+      select jsonb_agg(jsonb_build_object('client_entry_id', gen_random_uuid(), 'product_id', pr.id, 'storage_location_id', i.storage_location_id,
+                       'method', 'keypad',
+                       'breakdown', jsonb_build_array(jsonb_build_object('unit_id', pr.inventory_unit_id,
+                          'qty', greatest(0, round(app.book_qty(v_loc, pr.id, (v_day::timestamp + time '21:00') at time zone 'America/New_York')
+                                           - sp.weekly_usage * (0.92 + seed.rnd(pr.id::text || 'u' || v_week) * 0.16), 1))))))
+        into v_entries
+      from public.count_session_items i join public.products pr on pr.id = i.product_id join seed_products sp on sp.num = pr.product_number
+      join public.storage_locations sl on sl.id = i.storage_location_id and sl.name = sp.storage
+      where i.session_id = v_cnt
+        and (case when v_counter = v_maria then sl.name in ('Walk-In Cooler', 'Line Cooler')
+                  when v_counter = v_john then sl.name in ('Walk-In Freezer', 'Dry Storage A', 'Dry Storage B')
+                  else sl.name not in ('Walk-In Cooler', 'Line Cooler', 'Walk-In Freezer', 'Dry Storage A', 'Dry Storage B') end);
+      if v_entries is not null then perform public.save_count_entries(v_cnt, v_entries); end if;
+    end loop;
+    perform seed.as_user(v_gm);
+    perform public.submit_count_session(v_cnt);
+    perform public.post_count_session(v_cnt, true);
+  end loop;
+
+  -- ---------------------------------------------------------------- current week (open work for the demo)
+  perform seed.as_user(v_km);
+  -- Sysco order submitted for tomorrow: waiting to be received
+  select jsonb_agg(jsonb_build_object('product_id', pr.id, 'vendor_product_id', vp.id, 'order_qty', greatest(1, ceil(sp.weekly_usage / sp.pu_factor))))
+    into v_lines
+  from seed_products sp join public.products pr on pr.organization_id = v_org and pr.product_number = sp.num
+  join public.vendor_products vp on vp.product_id = pr.id and vp.vendor_id = (select id from public.vendors where organization_id = v_org and name = 'Sysco')
+  where sp.vendor = 'Sysco';
+  v_po := public.create_purchase_order(v_loc, (select id from public.vendors where organization_id = v_org and name = 'Sysco'), current_date + 1, v_lines);
+  perform public.set_purchase_order_status(v_po, 'submitted', null, null, true);
+  perform public.set_purchase_order_status(v_po, 'confirmed', null, 'SYS-CONF-' || to_char(current_date, 'MMDD'));
+
+  -- Local Produce delivered today, received but invoice not reconciled yet
+  select jsonb_agg(jsonb_build_object('product_id', pr.id, 'vendor_product_id', vp.id, 'order_qty', greatest(1, ceil(sp.weekly_usage / sp.pu_factor))))
+    into v_lines
+  from seed_products sp join public.products pr on pr.organization_id = v_org and pr.product_number = sp.num
+  join public.vendor_products vp on vp.product_id = pr.id and vp.vendor_id = (select id from public.vendors where organization_id = v_org and name = 'Local Produce Company')
+  where sp.vendor = 'Local Produce Company';
+  v_po := public.create_purchase_order(v_loc, (select id from public.vendors where organization_id = v_org and name = 'Local Produce Company'), current_date, v_lines);
+  perform public.set_purchase_order_status(v_po, 'submitted', null, null, true);
+  perform seed.as_user(v_maria);
+  v_rcv := public.create_receipt(v_loc, null, v_po);
+  select jsonb_agg(jsonb_build_object('id', ri.id, 'received_qty', case when pr.product_number = '2001' then ri.ordered_qty - 1 else ri.ordered_qty end,
+                   'invoiced_qty', ri.ordered_qty, 'invoice_price', case when pr.product_number = '2002' then ri.contract_price + 3 else ri.contract_price end))
+    into v_lines
+  from public.receipt_items ri join public.products pr on pr.id = ri.product_id where ri.receipt_id = v_rcv;
+  perform public.save_receipt(v_rcv, jsonb_build_object('invoice_number', 'LPC-' || to_char(current_date, 'YYMMDD'), 'invoice_date', current_date), v_lines);
+  perform public.save_receipt(v_rcv, jsonb_build_object('invoice_total', (public.receipt_totals(v_rcv) ->> 'calculated_total')::numeric), null);
+  perform public.complete_receiving(v_rcv);
+
+  -- A draft US Foods order to finish
+  perform seed.as_user(v_km);
+  -- Tasks
+  perform seed.as_user(v_gm);
+  insert into public.tasks (organization_id, location_id, title, task_type, due_at, recurrence, created_by) values
+    (v_org, v_loc, 'Weekly inventory count', 'count', (v_sunday + 7)::timestamp + time '21:00', 'weekly', v_gm),
+    (v_org, v_loc, 'Place US Foods order', 'order', (current_date::timestamp + time '15:00'), 'weekly', v_gm),
+    (v_org, v_loc, 'Place produce order', 'order', (current_date - 1)::timestamp + time '17:00', 'weekly', v_gm),
+    (v_org, v_loc, 'Count liquor', 'count', (current_date + 2)::timestamp + time '10:00', 'weekly', v_gm),
+    (v_org, v_loc, 'Review waste log', 'review_waste', (current_date + 1)::timestamp + time '10:00', 'weekly', v_gm);
+  perform public.refresh_stock_alerts(v_loc);
+  perform seed.as_admin();
+end $$;
+
+drop schema seed cascade;

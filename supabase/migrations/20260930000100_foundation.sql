@@ -462,7 +462,7 @@ create policy districts_write on public.districts for all to authenticated
   with check (app.has_org_permission('locations.manage', organization_id));
 
 create policy locations_select on public.locations for select to authenticated
-  using (id in (select app.user_location_ids()));
+  using (id in (select app.user_location_ids()) or app.has_org_permission('locations.manage', organization_id));
 create policy locations_insert on public.locations for insert to authenticated
   with check (app.has_org_permission('locations.manage', organization_id));
 create policy locations_update on public.locations for update to authenticated

@@ -1,0 +1,30 @@
+"use server";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import { fail, str } from "@/lib/actions";
+import type { ActionState } from "@/lib/action-types";
+
+function safeNext(next: string) {
+  return next.startsWith("/") && !next.startsWith("//") ? next : "/";
+}
+
+export async function signIn(_: ActionState, fd: FormData): Promise<ActionState> {
+  const supabase = await createClient();
+  const { error } = await supabase.auth.signInWithPassword({ email: str(fd, "email"), password: str(fd, "password") });
+  if (error) return fail({ message: error.message === "Invalid login credentials" ? "Email or password is incorrect." : error.message });
+  redirect(safeNext(str(fd, "next") || "/"));
+}
+
+export async function signUp(_: ActionState, fd: FormData): Promise<ActionState> {
+  const password = str(fd, "password");
+  if (password.length < 8) return fail({ message: "Use at least 8 characters for the password." });
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.signUp({
+    email: str(fd, "email"),
+    password,
+    options: { data: { full_name: str(fd, "full_name") } },
+  });
+  if (error) return fail(error);
+  if (!data.session) return { ok: true, message: "Check your email to confirm your account, then sign in.", at: Date.now() };
+  redirect("/onboarding");
+}

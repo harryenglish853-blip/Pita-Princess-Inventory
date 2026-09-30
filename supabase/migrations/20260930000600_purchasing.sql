@@ -323,7 +323,7 @@ begin
            vp.order_multiple, vp.min_order_qty,
            coalesce(b.on_hand, 0) as on_hand,
            app.on_order_qty(p_location, vp.product_id, p_exclude_po) as on_order,
-           lp.par_mode, case when lp.par_mode = 'dynamic' then lp.dynamic_par_qty when lp.par_mode = 'static' then lp.par_qty end as par,
+           lp.par_mode, case when lp.par_mode = 'dynamic' then coalesce(lp.dynamic_par_qty, lp.par_qty) when lp.par_mode = 'static' then lp.par_qty end as par,
            lp.safety_stock_qty, lp.safety_stock_days,
            (coalesce(lp.local_vendor_id, p.default_vendor_id,
                      (select v2.vendor_id from public.vendor_products v2 where v2.product_id = vp.product_id and v2.active

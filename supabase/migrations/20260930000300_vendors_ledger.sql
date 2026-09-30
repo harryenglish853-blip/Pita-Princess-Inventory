@@ -380,15 +380,17 @@ select
   app.current_unit_cost(lp.location_id, p.id) as unit_cost,
   round(coalesce(b.on_hand, 0) * app.current_unit_cost(lp.location_id, p.id), 2) as extended_value,
   lp.par_mode, lp.par_qty, lp.min_qty, lp.reorder_point, lp.dynamic_par_qty,
-  case when lp.par_mode = 'dynamic' then lp.dynamic_par_qty else lp.par_qty end as effective_par,
+  case when lp.par_mode = 'dynamic' then coalesce(lp.dynamic_par_qty, lp.par_qty) when lp.par_mode = 'static' then lp.par_qty end as effective_par,
   lp.avg_cost, lp.last_cost, lp.last_counted_at, b.last_txn_at,
   case
     when coalesce(b.on_hand, 0) < 0 then 'negative'
     when coalesce(b.on_hand, 0) = 0 then 'out'
     when lp.min_qty is not null and b.on_hand <= lp.min_qty then 'critical'
-    when coalesce(lp.reorder_point, lp.par_qty) is not null and b.on_hand <= coalesce(lp.reorder_point, lp.par_qty * 0.5) then 'low'
+    when coalesce(lp.reorder_point, case when lp.par_mode = 'dynamic' then coalesce(lp.dynamic_par_qty, lp.par_qty) else lp.par_qty end * 0.5) is not null
+         and b.on_hand <= coalesce(lp.reorder_point, case when lp.par_mode = 'dynamic' then coalesce(lp.dynamic_par_qty, lp.par_qty) else lp.par_qty end * 0.5) then 'low'
     else 'ok' end as stock_status,
-  p.active and lp.active as active
+  p.active and lp.active as active,
+  p.category_id is not null as categorized
 from public.location_products lp
 join public.products p on p.id = lp.product_id and p.deleted_at is null
 join public.units u on u.id = p.inventory_unit_id
