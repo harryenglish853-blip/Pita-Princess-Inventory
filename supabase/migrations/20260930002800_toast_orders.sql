@@ -309,7 +309,7 @@ declare o record; v_n int := 0; v_m int := 0; d date;
 begin
   if not app.is_trusted_caller() then perform app.require_permission('sales.import', p_location); end if;
   for o in select t.id, t.business_date from public.toast_orders t where t.location_id = p_location
-             and t.business_date >= coalesce(p_since, current_date - 35) and t.unmapped_items > 0 loop
+             and t.business_date >= coalesce(p_since, current_date - 60) and t.unmapped_items > 0 loop
     update public.toast_order_items i set menu_item_id = (
       select mi.id from public.menu_items mi where mi.organization_id = app.location_org(p_location) and mi.active
         and ((i.item_guid is not null and mi.pos_item_id = i.item_guid) or lower(mi.name) = lower(i.item_name))
@@ -321,7 +321,7 @@ begin
     v_m := v_m + app.apply_toast_order_usage(o.id);
     v_n := v_n + 1;
   end loop;
-  for d in select distinct business_date from public.toast_orders where location_id = p_location and business_date >= coalesce(p_since, current_date - 35) loop
+  for d in select distinct business_date from public.toast_orders where location_id = p_location and business_date >= coalesce(p_since, current_date - 60) loop
     perform app.rebuild_toast_day(p_location, d);
   end loop;
   if v_n > 0 then
@@ -344,7 +344,7 @@ language sql stable security definer set search_path = public as $$
     'unmapped', (select coalesce(jsonb_agg(x order by x.qty desc), '[]'::jsonb) from (
         select i.item_guid, i.item_name, sum(i.quantity) as qty from public.toast_order_items i join public.toast_orders o on o.id = i.order_id
         left join public.menu_items mi on mi.id = i.menu_item_id
-        where o.location_id = p_location and not i.voided and mi.recipe_id is null and o.business_date >= current_date - 35
+        where o.location_id = p_location and not i.voided and mi.recipe_id is null and o.business_date >= current_date - 60
         group by i.item_guid, i.item_name) x))
   where p_location in (select app.user_location_ids()) and app.has_permission('sales.import', p_location)
 $$;

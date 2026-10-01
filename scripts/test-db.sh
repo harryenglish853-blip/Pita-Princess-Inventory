@@ -7,7 +7,10 @@ psql "$DB_URL" -q -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/helpers.sql" >/dev
 status=0
 for f in "$ROOT"/supabase/tests/[0-9]*.sql; do
   echo "== $(basename "$f")"
-  if ! psql "$DB_URL" -q -v ON_ERROR_STOP=1 -f "$f" 2>&1 | sed -e 's/^psql:[^:]*:[0-9]*: //' ; then status=1; fi
-  if [ "${PIPESTATUS[0]}" != "0" ]; then status=1; fi
+  rc=0; out=$(psql "$DB_URL" -q -v ON_ERROR_STOP=1 -f "$f" 2>&1) || rc=$?
+  echo "$out" | sed -e 's/^psql:[^:]*:[0-9]*: //'
+  if [ "$rc" != "0" ]; then status=1; fi
+  # a skipped suite is a failure: CI always loads the demo seed
+  if echo "$out" | grep -q "SKIPPED"; then echo "!! $(basename "$f") was skipped"; status=1; fi
 done
 exit $status

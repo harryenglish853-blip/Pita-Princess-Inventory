@@ -14,11 +14,11 @@ begin
   select id into v_beef from public.products where organization_id = v_org and product_number = '1002';   -- 8 OZ per Cheeseburger
   select id into v_bun from public.products where organization_id = v_org and product_number = '4002';    -- 1 EA per Cheeseburger
   select recipe_id into v_burger from public.menu_items where organization_id = v_org and pos_item_id = 'P200';
-  v_today := (now() at time zone 'America/New_York')::date;
-  v_yday := v_today - 1;
-  if exists (select 1 from public.sales_imports where location_id = v_loc and business_date = v_today and status = 'posted') then
-    raise notice 'SKIPPED: today already imported'; return;
-  end if;
+  -- a business date with no sales yet (before the demo history); posted counts
+  -- exist after it, so this also exercises the "late change after a count" path
+  v_today := (now() at time zone 'America/New_York')::date - 40;
+  v_yday := (select max(business_date) from public.sales_imports where location_id = v_loc and status = 'posted' and source <> 'toast_api');
+  perform tests.assert(not exists (select 1 from public.sales_imports where location_id = v_loc and business_date = v_today and status = 'posted'), 'test day has no sales yet');
 
   perform tests.login(v_maria);
   begin
@@ -95,7 +95,8 @@ begin
   perform public.ingest_toast_order(v_loc, jsonb_set(jsonb_set(v_order, '{modified_at}', to_jsonb(v_ts + 3000)), '{voided}', 'true'), 'webhook');
   perform tests.assert(app.book_qty(v_loc, v_beef, now() + interval '1 day') = v_before - 2.0, 'voided order: its remaining 1 LB is put back');
   perform tests.assert((select net_sales from public.sales_imports where id = v_imp.id) = 39.80, 'voided order leaves sales');
-  perform tests.assert((select coalesce(sum(quantity), 0) from public.inventory_transactions where source_type = 'toast_order' and product_id = v_beef and location_id = v_loc) = -2.0,
+  perform tests.assert((select coalesce(sum(quantity), 0) from public.inventory_transactions where source_type = 'toast_order' and product_id = v_beef and location_id = v_loc
+                         and source_id in (select id from public.toast_orders where location_id = v_loc and toast_guid in ('order-A', 'order-B'))) = -2.0,
                        'ledger: Toast beef usage nets to exactly 2 LB');
 
   -- 10. reversal of the synced day is refused; a file-imported day holds sync
