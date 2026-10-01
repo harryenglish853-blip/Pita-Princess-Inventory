@@ -69,7 +69,7 @@ test.describe("ordering on", () => {
 test("order with manager override, short delivery with back order, reconcile and post", async ({ browser }) => {
   const gm = await newSession(browser, "gm@example.com");
   await gm.page.goto("/purchasing");
-  await gm.page.getByRole("link", { name: /US Foods/ }).first().click();
+  await gm.page.getByRole("link", { name: /Greco/ }).first().click();
   await gm.page.waitForURL(/purchasing\/(new|[0-9a-f-]{36})/);
   if (!/\/new/.test(gm.page.url())) {
     // A draft already exists: edit it

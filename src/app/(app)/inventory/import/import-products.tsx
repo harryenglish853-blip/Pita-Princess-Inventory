@@ -37,7 +37,7 @@ export function ImportProducts() {
     <div className="space-y-4">
       <Card title="1. Get your list into this layout">
         <div className="space-y-3 text-sm">
-          <p>Use the template, or your own sheet with similar column names (a Sysco or US Foods order-guide export usually works). Only <b>Item name</b> and <b>Count unit</b> are required.</p>
+          <p>Use the template, or your own sheet with similar column names (a Sysco or Greco order-guide export usually works). Only <b>Item name</b> and <b>Count unit</b> are required.</p>
           <Button size="sm" onClick={() => downloadFile("products-template.csv", productTemplateCsv(), "text/csv;charset=utf-8")}><Download className="h-4 w-4" /> Download template</Button>
           <div className="overflow-x-auto">
             <table className="tbl">

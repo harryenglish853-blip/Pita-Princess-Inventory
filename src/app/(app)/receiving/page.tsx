@@ -33,7 +33,7 @@ export default async function ReceivingPage({ searchParams }: { searchParams: Pr
         subtitle={ordering ? "Receive deliveries, check them against the order and invoice, then reconcile" : "Record each delivery from its invoice: what arrived, what it cost. Stock and costs update when it's posted."}
         actions={<NewReceiptButton vendors={vendors ?? []} label={ordering ? "Receive without PO" : "Log a delivery"} primary={!ordering} openFor={sp.log} />} />
       <div className="grid gap-4 lg:grid-cols-2">
-        {ordering ? <Card title="Pending deliveries" padded={false}>
+        {ordering || expected?.length ? <Card title="Expected deliveries" padded={false}>
           {expected?.length ? (
             <ul className="divide-y divide-border">
               {expected.map((po) => (
@@ -51,7 +51,7 @@ export default async function ReceivingPage({ searchParams }: { searchParams: Pr
             </ul>
           ) : <div className="p-4"><EmptyState title="No deliveries expected" /></div>}
         </Card> : null}
-        <Card title={ordering ? "Needs reconciliation" : "In progress"} padded={false} className={ordering ? undefined : "lg:col-span-2"}>
+        <Card title={ordering ? "Needs reconciliation" : "In progress"} padded={false} className={ordering || expected?.length ? undefined : "lg:col-span-2"}>
           {inProgress.length ? (
             <ul className="divide-y divide-border">
               {inProgress.map((r) => (

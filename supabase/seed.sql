@@ -7,7 +7,7 @@
 --   owner@example.com (System Owner)       gm@example.com (General Manager #101)
 --   kitchen@example.com (Kitchen Manager)  maria@example.com / john@example.com / carlos@example.com (Employees)
 --   accounting@example.com (Accounting)    regional@example.com (Regional Manager)
---   owner2@example.com (second System Owner)
+--   owner2@example.com (second System Owner)        commissary@example.com (Kitchen Manager, Central Kitchen C1)
 --   employee@example.com (SHARED employee login: pick John 2580, Maria 3691, Carlos 4826 or Alex 5937)
 -- Do NOT run this against a production database.
 -- =====================================================================
@@ -75,21 +75,21 @@ create temporary table seed_products (
 ) on commit drop;
 
 insert into seed_products values
- ('1001','Chicken Breast, Boneless','Food','Protein','LB','OZ','CASE',40,null,null,'US Foods','48219','4/10 LB',128.00,95,110,'Walk-In Cooler','Shelf 2',true,41,true,'{0.856,0.878,0.925,1}'),
- ('1002','Ground Beef 80/20','Food','Protein','LB','OZ','CASE',20,null,null,'US Foods','51127','4/5 LB',89.00,68,80,'Walk-In Cooler','Shelf 2',true,41,true,'{0.97,0.98,0.99,1}'),
+ ('1001','Chicken Breast, Boneless','Food','Protein','LB','OZ','CASE',40,null,null,'Greco','48219','4/10 LB',128.00,95,110,'Walk-In Cooler','Shelf 2',true,41,true,'{0.856,0.878,0.925,1}'),
+ ('1002','Ground Beef 80/20','Food','Protein','LB','OZ','CASE',20,null,null,'Greco','51127','4/5 LB',89.00,68,80,'Walk-In Cooler','Shelf 2',true,41,true,'{0.97,0.98,0.99,1}'),
  ('1003','Salmon Fillet, Atlantic','Food','Seafood','LB','OZ','CASE',10,null,null,'Sysco','7731045','10 LB',129.00,18,20,'Walk-In Cooler','Shelf 2',false,41,true,'{1,1,1.02,1}'),
  ('1004','Shrimp 16/20 IQF','Food','Seafood','LB','OZ','CASE',10,'BAG',2,'Sysco','5520811','5/2 LB',95.00,12,15,'Walk-In Freezer','Shelf 1',false,10,false,'{1,1,1,1}'),
- ('1005','Bacon, Sliced','Food','Protein','LB','OZ','CASE',15,null,null,'US Foods','33902','15 LB',78.00,8,10,'Walk-In Cooler','Shelf 2',false,41,false,'{0.95,0.97,1,1}'),
+ ('1005','Bacon, Sliced','Food','Protein','LB','OZ','CASE',15,null,null,'Greco','33902','15 LB',78.00,8,10,'Walk-In Cooler','Shelf 2',false,41,false,'{0.95,0.97,1,1}'),
  ('2001','Avocado, Hass','Food','Produce','EA','EA','CASE',48,null,null,'Local Produce Company','AV48','48 CT',47.00,150,120,'Walk-In Cooler','Shelf 3',false,null,true,'{0.9,0.95,1.04,1}'),
  ('2002','Tomatoes, 5x6','Food','Produce','LB','OZ','CASE',25,null,null,'Local Produce Company','TM25','25 LB',32.00,45,40,'Walk-In Cooler','Shelf 3',true,null,true,'{1,1.03,1,1}'),
  ('2003','Lettuce, Romaine','Food','Produce','EA','EA','CASE',24,null,null,'Local Produce Company','RM24','24 CT',36.00,40,36,'Walk-In Cooler','Shelf 3',true,null,true,'{1,1,1,1}'),
  ('2004','Onions, Yellow Jumbo','Food','Produce','LB','OZ','BAG',50,null,null,'Local Produce Company','ON50','50 LB',28.00,8,15,'Dry Storage A','Rack 1',false,null,false,'{1,1,1,1}'),
- ('3001','Cheddar, Sliced','Food','Dairy','LB','OZ','CASE',20,null,null,'US Foods','66120','4/5 LB',74.00,9,12,'Walk-In Cooler','Shelf 1',true,41,false,'{1,1,1,1}'),
- ('3002','Mozzarella, Shredded','Food','Dairy','LB','OZ','CASE',20,'BAG',5,'US Foods','66145','4/5 LB',66.00,3,5,'Walk-In Cooler','Shelf 1',false,41,false,'{1,1,1,1}'),
- ('3003','Heavy Cream','Food','Dairy','QT','FL OZ','CASE',12,'CTN',1,'US Foods','70012','12/1 QT',52.00,4,6,'Walk-In Cooler','Shelf 1',false,41,false,'{0.96,1,1,1}'),
- ('3004','Butter, Unsalted','Food','Dairy','LB','OZ','CASE',36,null,null,'US Foods','70301','36/1 LB',118.00,2,4,'Walk-In Cooler','Shelf 1',false,41,false,'{1,1,1,1}'),
- ('4001','French Fries 3/8"','Food','Frozen','LB','OZ','CASE',30,'BAG',5,'US Foods','11248','6/5 LB',38.50,90,90,'Walk-In Freezer','Shelf 2',false,10,false,'{1,1,1,1}'),
- ('4002','Burger Buns, Brioche','Food','Bakery','EA','EA','CASE',96,'PK',8,'US Foods','20488','12/8 CT',28.00,400,360,'Dry Storage A','Rack 2',false,null,false,'{1,1,1,1}'),
+ ('3001','Cheddar, Sliced','Food','Dairy','LB','OZ','CASE',20,null,null,'Greco','66120','4/5 LB',74.00,9,12,'Walk-In Cooler','Shelf 1',true,41,false,'{1,1,1,1}'),
+ ('3002','Mozzarella, Shredded','Food','Dairy','LB','OZ','CASE',20,'BAG',5,'Greco','66145','4/5 LB',66.00,3,5,'Walk-In Cooler','Shelf 1',false,41,false,'{1,1,1,1}'),
+ ('3003','Heavy Cream','Food','Dairy','QT','FL OZ','CASE',12,'CTN',1,'Greco','70012','12/1 QT',52.00,4,6,'Walk-In Cooler','Shelf 1',false,41,false,'{0.96,1,1,1}'),
+ ('3004','Butter, Unsalted','Food','Dairy','LB','OZ','CASE',36,null,null,'Greco','70301','36/1 LB',118.00,2,4,'Walk-In Cooler','Shelf 1',false,41,false,'{1,1,1,1}'),
+ ('4001','French Fries 3/8"','Food','Frozen','LB','OZ','CASE',30,'BAG',5,'Greco','11248','6/5 LB',38.50,90,90,'Walk-In Freezer','Shelf 2',false,10,false,'{1,1,1,1}'),
+ ('4002','Burger Buns, Brioche','Food','Bakery','EA','EA','CASE',96,'PK',8,'Greco','20488','12/8 CT',28.00,400,360,'Dry Storage A','Rack 2',false,null,false,'{1,1,1,1}'),
  ('4003','Flour, All Purpose','Food','Dry Goods','LB','OZ','BAG',50,null,null,'Sysco','4412030','50 LB',22.00,25,50,'Dry Storage A','Rack 3',false,null,false,'{1,1,1,1}'),
  ('4004','Rice, Long Grain','Food','Dry Goods','LB','OZ','BAG',25,null,null,'Sysco','4415501','25 LB',24.00,13,20,'Dry Storage A','Rack 3',false,null,false,'{1,1,1,1}'),
  ('4005','Fryer Oil, Soybean','Food','Dry Goods','LB','OZ','JUG',35,null,null,'Sysco','6600352','35 LB',46.00,40,35,'Dry Storage B','Floor',false,null,false,'{0.93,0.96,1,1}'),
@@ -97,12 +97,16 @@ insert into seed_products values
  ('5002','Sprite 12 oz Can','Beverage','Soft Drinks','EA','EA','CASE',24,null,null,'Beverage Distributor','SP12','24/12 OZ',15.00,60,48,'Beer Cooler','Top',false,null,false,'{1,1,1,1}'),
  ('5003','Draft IPA, Local','Alcohol','Beer','GAL','FL OZ','KEG',15.5,null,null,'Beverage Distributor','IPA-HB','1/2 BBL',165.00,15,15.5,'Beer Cooler','Floor',false,null,false,'{1,1,1,1}'),
  ('5004','House Cabernet Sauvignon','Alcohol','Wine','BTL','BTL','CASE',12,null,null,'Beverage Distributor','CAB750','12/750 ML',120.00,18,24,'Liquor Storage','Rack A',false,null,false,'{1,1,1,1}'),
- ('6001','Napkins, Dinner','Paper','Disposables','PK','PK','CASE',12,null,null,'US Foods','90011','12/500 CT',45.00,6,8,'Front Storage','Shelf 1',false,null,false,'{1,1,1,1}'),
- ('6002','To-Go Container 9x9','Paper','Disposables','EA','EA','CASE',200,null,null,'US Foods','90450','200 CT',54.00,250,200,'Front Storage','Shelf 2',false,null,false,'{1,1,1,1}'),
+ ('6001','Napkins, Dinner','Paper','Disposables','PK','PK','CASE',12,null,null,'Greco','90011','12/500 CT',45.00,6,8,'Front Storage','Shelf 1',false,null,false,'{1,1,1,1}'),
+ ('6002','To-Go Container 9x9','Paper','Disposables','EA','EA','CASE',200,null,null,'Greco','90450','200 CT',54.00,250,200,'Front Storage','Shelf 2',false,null,false,'{1,1,1,1}'),
  ('6003','Gloves, Nitrile Large','Supplies','Kitchen Supplies','BOX','BOX','CASE',10,null,null,'Sysco','8800123','10/100 CT',62.00,6,6,'Front Storage','Shelf 3',false,null,false,'{1,1,1,1}'),
  ('4006','Mayonnaise','Food','Dry Goods','LB','OZ','CASE',30,null,null,'Sysco','4420088','4/1 GAL',62.00,22,25,'Dry Storage A','Rack 3',false,null,false,'{1,1,1,1}'),
  ('7001','Salsa (prepped)','Food','Prepared','LB','OZ','BATCH',10,null,null,'','','10 LB batch',9.00,40,20,'Walk-In Cooler','Shelf 3',false,41,true,'{1,1,1,1}'),
- ('6004','Sanitizer, Quaternary','Supplies','Chemicals','GAL','FL OZ','CASE',4,null,null,'Sysco','8812007','4/1 GAL',58.00,2,4,'Chemical Storage','Shelf 1',false,null,false,'{1,1,1,1}');
+ ('6004','Sanitizer, Quaternary','Supplies','Chemicals','GAL','FL OZ','CASE',4,null,null,'Sysco','8812007','4/1 GAL',58.00,2,4,'Chemical Storage','Shelf 1',false,null,false,'{1,1,1,1}'),
+ ('3005','Pepperoni, Sliced','Food','Protein','LB','OZ','CASE',12.5,null,null,'Greco','GR-PEP125','2/6.25 LB',61.00,10,12,'Walk-In Cooler','Shelf 2',false,41,false,'{0.97,0.98,1,1}'),
+ ('8001','Pizza Dough Ball, 16 oz','Food','Prepared','EA','EA','PAN',12,null,null,'Commissary','CM-DOUGH','12 EA pan',0,110,100,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('8002','Marinara Sauce','Food','Prepared','LB','OZ','CTN',5,null,null,'Commissary','CM-MARINARA','5 LB container',0,30,25,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('8003','Meatballs, 2 oz','Food','Prepared','EA','EA','PAN',50,null,null,'Commissary','CM-MEATBALL','50 EA pan',0,90,80,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}');
 
 grant select on seed_products to authenticated;
 
@@ -118,6 +122,8 @@ declare
   v_reg uuid := seed.user('regional@example.com', 'Rita Regional');
   v_owner2 uuid := seed.user('owner2@example.com', 'Olivia Owner');
   v_shared uuid := seed.user('employee@example.com', 'Employee Login (shared)');
+  v_cmu uuid := seed.user('commissary@example.com', 'Chris Commissary');
+  v_comm uuid;
   v_org uuid; v_loc uuid; v_loc2 uuid; v_region uuid; v_district uuid;
   p record; v record; s record;
   v_cat_top uuid; v_cat uuid; v_pid uuid; v_vendor uuid; v_storage uuid;
@@ -139,6 +145,9 @@ begin
   insert into public.locations (organization_id, region_id, district_id, market, code, name, timezone, address_line1, city, state)
     values (v_org, v_region, v_district, 'Springfield', '105', 'Demo Restaurant Westside', 'America/New_York', '505 West Ave', 'Springfield', 'IL')
     returning id into v_loc2;
+  insert into public.locations (organization_id, region_id, district_id, market, code, name, timezone, address_line1, city, state, kind)
+    values (v_org, v_region, v_district, 'Springfield', 'C1', 'Central Kitchen', 'America/New_York', '900 Industrial Pkwy', 'Springfield', 'IL', 'commissary')
+    returning id into v_comm;
 
   perform public.assign_role(v_org, v_gm, 'general_manager', 'location', v_loc);
   perform public.assign_role(v_org, v_km, 'kitchen_manager', 'location', v_loc);
@@ -148,6 +157,8 @@ begin
   perform public.assign_role(v_org, v_acct, 'accounting', 'organization', v_org);
   perform public.assign_role(v_org, v_reg, 'regional_manager', 'region', v_region);
   perform public.assign_role(v_org, v_owner2, 'system_owner', 'organization', v_org);
+  perform public.assign_role(v_org, v_cmu, 'kitchen_manager', 'location', v_comm);
+  update public.profiles set default_location_id = v_comm where id = v_cmu;
   perform public.assign_role(v_org, v_shared, 'employee', 'location', v_loc);
   perform public.set_shared_login(v_org, v_shared, true);
   -- "Who are you?" names on the shared employee login (demo PINs)
@@ -160,10 +171,13 @@ begin
   -- ---------------------------------------------------------------- vendors
   insert into public.vendors (organization_id, name, vendor_number, account_number, sales_rep, phone, email, ordering_email, edi_enabled, einvoice_enabled,
                               order_website, delivery_days, lead_time_days, order_cutoff, minimum_order, freight_rules, payment_terms) values
-    (v_org, 'US Foods', 'USF-100', '4410-2231', 'Dana Whitfield', '(555) 300-1000', 'dana.whitfield@example.com', 'orders@example.com', true, true, 'https://order.example.com/usfoods', '{2,5}', 1, '15:00', 350, 'Free over $350; $35 fee below', 'Net 14'),
-    (v_org, 'Sysco', 'SYS-200', 'SY-88213', 'Marcus Lee', '(555) 300-2000', 'marcus.lee@example.com', 'orders@example.com', true, true, 'https://order.example.com/sysco', '{1,4}', 1, '14:00', 300, 'Free over $300', 'Net 21'),
+    (v_org, 'Greco', 'GRE-100', '4410-2231', 'Dana Whitfield', '(555) 300-1000', 'dana.whitfield@example.com', 'orders@example.com', true, true, 'https://order.example.com/greco', '{2,5}', 1, '15:00', 350, 'Free over $350; $35 fee below', 'Net 14'),
+    (v_org, 'Sysco', 'SYS-200', 'SY-88213', 'Marcus Lee', '(555) 300-2000', 'marcus.lee@example.com', 'orders@example.com', true, true, 'https://shop.sysco.com', '{1,4}', 1, '14:00', 300, 'Free over $300', 'Net 21'),
     (v_org, 'Local Produce Company', 'LPC-300', 'LP-0101', 'Sam Greene', '(555) 300-3000', 'sam@example.com', 'orders@example.com', false, false, null, '{1,3,5}', 1, '17:00', 75, 'No freight charge', 'COD'),
     (v_org, 'Beverage Distributor', 'BEV-400', 'BD-5510', 'Priya Patel', '(555) 300-4000', 'priya@example.com', 'orders@example.com', false, true, null, '{2}', 2, '12:00', 150, 'Free', 'Net 30');
+  insert into public.vendors (organization_id, name, kind, supplying_location_id, phone, email, ordering_email, delivery_days, lead_time_days, order_cutoff, minimum_order, notes)
+    values (v_org, 'Commissary', 'commissary', v_comm, '(555) 300-9000', 'commissary@example.com', 'commissary@example.com', '{1,3,5}', 1, '18:00', 0,
+            'Our central kitchen: pizza dough, marinara, meatballs. Ordered and received in this app.');
 
   -- ---------------------------------------------------------------- storage areas (#101) in walking order
   insert into public.storage_locations (organization_id, location_id, name, kind, sort_order) values
@@ -173,6 +187,8 @@ begin
     (v_org, v_loc, 'Chemical Storage', 'chemical', 9);
   insert into public.storage_locations (organization_id, location_id, name, kind, sort_order)
     select v_org, v_loc2, name, kind, sort_order from public.storage_locations where location_id = v_loc;
+  insert into public.storage_locations (organization_id, location_id, name, kind, sort_order) values
+    (v_org, v_comm, 'Walk-In Cooler', 'walk_in_cooler', 1), (v_org, v_comm, 'Walk-In Freezer', 'walk_in_freezer', 2), (v_org, v_comm, 'Dry Storage A', 'dry_storage', 3);
 
   -- ---------------------------------------------------------------- categories & products
   for p in select * from seed_products loop
@@ -195,7 +211,7 @@ begin
             (select id from public.units where code = p.pu and organization_id is null),
             v_vendor, 'SKU-' || p.num, p.temp_max,
             case p.sub when 'Produce' then 7 when 'Protein' then 5 when 'Seafood' then 3 when 'Dairy' then 14 else null end,
-            round(p.price / p.pu_factor, 6), p.vendor = '', v_owner)
+            round(p.price / p.pu_factor, 6), p.vendor in ('', 'Commissary'), v_owner)
     returning id into v_pid;
     insert into public.product_units (organization_id, product_id, unit_id, factor, use_for_count, use_for_purchase, label)
     values (v_org, v_pid, (select id from public.units where code = p.pu and organization_id is null), p.pu_factor, true, true, p.pu || ' (' || p.pack || ')');
@@ -218,7 +234,7 @@ begin
          pp.purchase_unit_id, case pp.product_number when '1001' then '4/10 LB' else '6/5 LB' end,
          case pp.product_number when '1001' then 131.50 else 39.95 end, null, null, null, 900
   from public.products pp where pp.organization_id = v_org and pp.product_number in ('1001', '4001');
-  -- Contract price on fries at US Foods
+  -- Contract price on fries at Greco
   update public.vendor_products set contract_price = 37.25, contract_start = current_date - 60, contract_end = current_date + 120
   where organization_id = v_org and vendor_item_number = '11248';
 
@@ -238,6 +254,8 @@ begin
          count_daily = sp.daily, count_weekly = true
   from seed_products sp join public.products pr on pr.product_number = sp.num
   where pr.organization_id = v_org and lp.product_id = pr.id;
+  update public.location_products lp set active = (pr.product_number in ('1002', '2002', '2004', '4003', '4005', '8001', '8002', '8003'))
+  from public.products pr where pr.id = lp.product_id and lp.location_id = v_comm;
   update public.location_products set par_mode = 'dynamic' where product_id in (select id from public.products where organization_id = v_org and product_number in ('1001', '2001'))
     and location_id = v_loc;
 
@@ -248,6 +266,9 @@ begin
   insert into seed_recipes values
     ('House Sauce', 'sub_recipe', 1, 'LB', null, '[["P","4006",0.9,"LB"],["P","2004",0.1,"LB"]]', null, null, 0, null),
     ('Salsa', 'prep', 10, 'LB', '7001', '[["P","2002",7,"LB"],["P","2004",1,"LB"],["P","2001",4,"EA"]]', null, null, 0, null),
+    ('Pizza Dough', 'prep', 24, 'EA', '8001', '[["P","4003",13.2,"LB"],["P","4005",0.3,"LB"]]', null, null, 0, null),
+    ('Marinara Sauce', 'prep', 10, 'LB', '8002', '[["P","2002",9,"LB"],["P","2004",0.75,"LB"],["P","4005",0.25,"LB"]]', null, null, 0, null),
+    ('Meatballs', 'prep', 50, 'EA', '8003', '[["P","1002",6.25,"LB"],["P","4003",0.4,"LB"],["P","2004",0.3,"LB"]]', null, null, 0, null),
     ('Grilled Chicken Pita', 'menu_item', 1, 'EA', null, '[["P","1001",6,"OZ"],["P","4002",1,"EA"],["P","2002",1,"OZ"],["P","2003",0.1,"EA"],["R","House Sauce",1,"OZ"]]', 7.95, 'P100', 250, 'Entrees'),
     ('Cheeseburger', 'menu_item', 1, 'EA', null, '[["P","1002",8,"OZ"],["P","4002",1,"EA"],["P","3001",1,"OZ"],["P","2003",0.1,"EA"],["R","House Sauce",1,"OZ"]]', 8.95, 'P200', 80, 'Entrees'),
     ('Bacon Cheeseburger', 'menu_item', 1, 'EA', null, '[["P","1002",8,"OZ"],["P","4002",1,"EA"],["P","3001",1,"OZ"],["P","1005",2,"OZ"],["R","House Sauce",1,"OZ"]]', 9.95, 'P210', 55, 'Entrees'),
@@ -306,7 +327,7 @@ begin
 
   -- ---------------------------------------------------------------- 4 weeks of deliveries + weekly counts at #101
   for v_week in 1..4 loop
-    for v in select * from public.vendors where organization_id = v_org order by name loop
+    for v in select * from public.vendors where organization_id = v_org and kind = 'distributor' order by name loop
       -- delivery day: the vendor's first delivery weekday in this week
       v_day := (v_sunday - 28 + (v_week - 1) * 7) + (select min(d) from unnest(v.delivery_days) d)::int;
       perform seed.as_user(v_km);
@@ -439,13 +460,67 @@ begin
   perform public.save_receipt(v_rcv, jsonb_build_object('invoice_total', (public.receipt_totals(v_rcv) ->> 'calculated_total')::numeric), null);
   perform public.complete_receiving(v_rcv);
 
-  -- A draft US Foods order to finish
+  -- (Greco is ordered on its website from the Ordering Center)
+
+  -- ---------------------------------------------------------------- email recipients (configured in Administration -> Email)
+  perform seed.as_user(v_owner);
+  perform public.save_email_recipient(v_org, null, 'Harry Owner', 'owner@example.com', null, true,
+    array['daily_report','weekly_report','monthly_report','waste_alert','variance_alert','delivery_discrepancy','price_alert','critical_stock','sync_failure']);
+  perform public.save_email_recipient(v_org, null, 'Olivia Owner', 'owner2@example.com', null, true, array['weekly_report','monthly_report']);
+  perform public.save_email_recipient(v_org, null, 'Gina Manager', 'gm@example.com', v_loc, true,
+    array['daily_report','weekly_report','waste_alert','variance_alert','delivery_discrepancy','price_alert','critical_stock','low_stock','inventory_due','vendor_order_reminder']);
+  perform public.save_email_recipient(v_org, null, 'Central Kitchen', 'commissary@example.com', v_comm, true, array['commissary_order']);
+
+  -- ---------------------------------------------------------------- commissary: opening stock, production, orders
+  perform seed.as_user(v_cmu);
+  v_cnt := public.create_count_session(v_comm, 'full', 'Commissary Opening Inventory', now() - interval '2 days');
+  select jsonb_agg(jsonb_build_object('client_entry_id', gen_random_uuid(), 'product_id', pr.id, 'storage_location_id', i.storage_location_id,
+                   'breakdown', jsonb_build_array(jsonb_build_object('unit_id', pr.inventory_unit_id,
+                      'qty', case pr.product_number when '4003' then 150 when '1002' then 40 when '2002' then 100 when '2004' then 30 when '4005' then 35 else 0 end))))
+    into v_entries
+  from public.count_session_items i join public.products pr on pr.id = i.product_id where i.session_id = v_cnt;
+  perform public.save_count_entries(v_cnt, v_entries);
+  perform public.submit_count_session(v_cnt);
+  perform public.post_count_session(v_cnt, true);
+  -- standard costs for raw items at the commissary (bought from Sysco/Greco)
+  perform seed.as_admin();
+  update public.location_products lp set avg_cost = coalesce(nullif(r.avg_cost, 0), lp.avg_cost)
+  from public.location_products r where r.location_id = v_loc and r.product_id = lp.product_id and lp.location_id = v_comm;
+  perform seed.as_user(v_cmu);
+  perform public.record_production(v_comm, (select id from public.recipes where organization_id = v_org and name = 'Pizza Dough'), 240, 240, null, 'Morning dough run', now() - interval '1 day');
+  perform public.record_production(v_comm, (select id from public.recipes where organization_id = v_org and name = 'Marinara Sauce'), 60, 58, null, null, now() - interval '1 day');
+  perform public.record_production(v_comm, (select id from public.recipes where organization_id = v_org and name = 'Meatballs'), 200, 200, null, null, now() - interval '1 day');
+
+  -- #101 ordered 100 meatballs; the commissary shipped 100; the restaurant counted 95 (spec example)
+  perform seed.as_user(v_gm);
+  v_po := public.save_commissary_order(null, v_loc, (select id from public.vendors where organization_id = v_org and kind = 'commissary'), current_date,
+    'For the weekend', jsonb_build_array(
+      jsonb_build_object('product_id', (select id from public.products where organization_id = v_org and product_number = '8001'), 'unit_id', (select id from public.units where code = 'EA' and organization_id is null), 'qty', 120),
+      jsonb_build_object('product_id', (select id from public.products where organization_id = v_org and product_number = '8002'), 'unit_id', (select id from public.units where code = 'CTN' and organization_id is null), 'qty', 4),
+      jsonb_build_object('product_id', (select id from public.products where organization_id = v_org and product_number = '8003'), 'unit_id', (select id from public.units where code = 'EA' and organization_id is null), 'qty', 100)));
+  perform public.submit_commissary_order(v_po);
+  perform seed.as_user(v_cmu);
+  perform public.set_commissary_status(v_po, 'accepted');
+  perform public.set_commissary_status(v_po, 'ready');
+  perform public.ship_commissary_order(v_po, '[]'::jsonb);
+  perform seed.as_user(v_maria);
+  perform public.receive_commissary_order(v_po, (select jsonb_agg(jsonb_build_object('id', i.id,
+      'qty_received', case when pd.product_number = '8003' then 95 else i.qty_shipped end))
+    from public.commissary_order_items i join public.products pd on pd.id = i.product_id where i.order_id = v_po));
+  -- tomorrow's order, waiting for the commissary to accept
+  perform seed.as_user(v_gm);
+  v_po := public.save_commissary_order(null, v_loc, (select id from public.vendors where organization_id = v_org and kind = 'commissary'), current_date + 1,
+    null, jsonb_build_array(
+      jsonb_build_object('product_id', (select id from public.products where organization_id = v_org and product_number = '8001'), 'unit_id', (select id from public.units where code = 'PAN' and organization_id is null), 'qty', 8),
+      jsonb_build_object('product_id', (select id from public.products where organization_id = v_org and product_number = '8003'), 'unit_id', (select id from public.units where code = 'EA' and organization_id is null), 'qty', 80)));
+  perform public.submit_commissary_order(v_po);
+
   perform seed.as_user(v_km);
   -- Tasks
   perform seed.as_user(v_gm);
   insert into public.tasks (organization_id, location_id, title, task_type, due_at, recurrence, created_by) values
     (v_org, v_loc, 'Weekly inventory count', 'count', (v_sunday + 7)::timestamp + time '21:00', 'weekly', v_gm),
-    (v_org, v_loc, 'Place US Foods order', 'order', (current_date::timestamp + time '15:00'), 'weekly', v_gm),
+    (v_org, v_loc, 'Place Greco order', 'order', (current_date::timestamp + time '15:00'), 'weekly', v_gm),
     (v_org, v_loc, 'Place produce order', 'order', (current_date - 1)::timestamp + time '17:00', 'weekly', v_gm),
     (v_org, v_loc, 'Count liquor', 'count', (current_date + 2)::timestamp + time '10:00', 'weekly', v_gm),
     (v_org, v_loc, 'Review waste log', 'review_waste', (current_date + 1)::timestamp + time '10:00', 'weekly', v_gm);

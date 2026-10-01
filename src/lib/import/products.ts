@@ -9,7 +9,7 @@ export const PRODUCT_COLUMNS = [
   { key: "count_unit", label: "Count unit", required: true, help: "The smallest unit you count in: LB, EA, OZ, GAL…" },
   { key: "case_unit", label: "Case unit", help: "How it arrives: CASE, BAG, BOX… (blank = CASE when Per case is filled)" },
   { key: "per_case", label: "Per case", help: "How many count units in one case, e.g. 40" },
-  { key: "vendor", label: "Vendor", help: "Sysco, US Foods…" },
+  { key: "vendor", label: "Vendor", help: "Sysco, Greco…" },
   { key: "vendor_item_number", label: "Vendor item #", help: "The vendor's code for it" },
   { key: "case_price", label: "Case price", help: "Price for one case (or one count unit if there is no case)" },
   { key: "storage_area", label: "Storage area", help: "Walk-In Cooler, Freezer, Dry Storage…" },
