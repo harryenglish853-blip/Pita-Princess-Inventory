@@ -70,5 +70,9 @@ cat > "$ROOT/.env.local" <<ENV
 NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
 NEXT_PUBLIC_SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
 SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY
+# local-only test secrets (never reuse in production)
+CRON_SECRET=local-cron-secret
+TOAST_WEBHOOK_SECRET=local-toast-secret
+APP_URL=http://localhost:3000
 ENV
 echo "Local stack ready: API http://127.0.0.1:54321  DB $DB_URL  (.env.local written)"

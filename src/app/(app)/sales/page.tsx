@@ -1,7 +1,7 @@
 import { requirePermission, can } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 import { DataTable } from "@/components/data-table";
-import { PageHeader } from "@/components/ui";
+import { PageHeader, TabLinks } from "@/components/ui";
 import { todayIn } from "@/lib/format";
 import { ImportForm } from "./import-form";
 
@@ -18,7 +18,8 @@ export default async function SalesPage() {
   const rows = (imports ?? []).map((i) => ({ ...i, theo_pct: Number(i.net_sales) ? (Number(i.theoretical_cost) / Number(i.net_sales)) * 100 : null, avg_check: i.check_count ? Number(i.net_sales) / i.check_count : null }));
   return (
     <>
-      <PageHeader title="Sales / POS" subtitle="Daily POS sales drive theoretical usage: items sold × recipes" />
+      <PageHeader title="Sales / Toast" subtitle="Toast sales drive theoretical usage: items sold × recipes" />
+      <TabLinks active="imports" tabs={[{ key: "imports", label: "Daily sales", href: "/sales" }, { key: "toast", label: "Toast sync", href: "/sales/toast" }]} />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,28rem)_1fr]">
         <ImportForm yesterday={todayIn(ctx.location.timezone, -1)} menu={(menu ?? []).map((m) => ({ name: m.name, pos_item_id: m.pos_item_id, mapped: !!m.recipe_id }))} />
         <DataTable id="sales-imports" rows={rows} exportName="sales" initialSort={{ key: "business_date", dir: -1 }} columns={[

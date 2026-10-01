@@ -515,6 +515,37 @@ begin
       jsonb_build_object('product_id', (select id from public.products where organization_id = v_org and product_number = '8003'), 'unit_id', (select id from public.units where code = 'EA' and organization_id is null), 'qty', 80)));
   perform public.submit_commissary_order(v_po);
 
+  -- ---------------------------------------------------------------- Toast: today's orders arrive one by one (order-level sync)
+  perform seed.as_user(v_owner);
+  perform public.set_toast_restaurant(v_loc, '6f1c2a54-0d7e-4b8a-9b1e-101101101101');
+  perform seed.as_user(v_gm);
+  declare
+    v_d date := (now() at time zone 'America/New_York')::date;
+    v_t bigint := (extract(epoch from now()) * 1000)::bigint - 3600000;
+    v_o jsonb;
+  begin
+    for v_i in 1..12 loop
+      v_o := jsonb_build_object('guid', 'demo-order-' || v_i, 'business_date', v_d, 'modified_at', v_t + v_i * 60000, 'guest_count', 1 + v_i % 3,
+        'selections', jsonb_build_array(
+          jsonb_build_object('guid', 'demo-sel-' || v_i || '-a', 'item_guid', case v_i % 3 when 0 then 'P200' when 1 then 'P100' else 'P210' end,
+                             'name', case v_i % 3 when 0 then 'Cheeseburger' when 1 then 'Grilled Chicken Pita' else 'Bacon Cheeseburger' end,
+                             'quantity', 1 + v_i % 2, 'net_sales', (1 + v_i % 2) * case v_i % 3 when 0 then 8.95 when 1 then 7.95 else 9.95 end),
+          jsonb_build_object('guid', 'demo-sel-' || v_i || '-b', 'item_guid', 'P400', 'name', 'French Fries', 'quantity', 1, 'net_sales', 2.95)));
+      perform public.ingest_toast_order(v_loc, v_o, 'demo');
+      if v_i = 3 then perform public.ingest_toast_order(v_loc, v_o, 'demo'); end if;            -- webhook delivered twice: ignored
+    end loop;
+    -- order 5: a second pita added after it was first sent
+    perform public.ingest_toast_order(v_loc, jsonb_build_object('guid', 'demo-order-5', 'business_date', v_d, 'modified_at', v_t + 3000000, 'guest_count', 2,
+      'selections', jsonb_build_array(jsonb_build_object('guid', 'demo-sel-5-a', 'item_guid', 'P210', 'name', 'Bacon Cheeseburger', 'quantity', 3, 'net_sales', 29.85),
+                                      jsonb_build_object('guid', 'demo-sel-5-b', 'item_guid', 'P400', 'name', 'French Fries', 'quantity', 1, 'net_sales', 2.95))), 'demo');
+    -- order 7 voided
+    perform public.ingest_toast_order(v_loc, jsonb_build_object('guid', 'demo-order-7', 'business_date', v_d, 'modified_at', v_t + 3100000, 'voided', true,
+      'selections', '[]'::jsonb), 'demo');
+    -- a new menu item nobody has mapped yet
+    perform public.ingest_toast_order(v_loc, jsonb_build_object('guid', 'demo-order-13', 'business_date', v_d, 'modified_at', v_t + 3200000, 'guest_count', 2,
+      'selections', jsonb_build_array(jsonb_build_object('guid', 'demo-sel-13-a', 'item_guid', 'TOAST-NEW-LAMB', 'name', 'Lamb Gyro Special', 'quantity', 2, 'net_sales', 25.90))), 'demo');
+  end;
+
   perform seed.as_user(v_km);
   -- Tasks
   perform seed.as_user(v_gm);
