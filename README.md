@@ -1,6 +1,6 @@
 # Stockline — restaurant inventory & food-cost operating system
 
-Built for **Pita Princess**. Stockline runs the whole inventory loop for one restaurant or a thousand:
+Built for **Princess Pita**. Stockline runs the whole inventory loop for one restaurant or a thousand:
 
 **forecast → plan → order → receive → store → transfer → prep → sell → waste/adjust → count → compare actual vs theoretical → find the variance → forecast again.**
 
@@ -111,6 +111,8 @@ npm run dev              # http://localhost:3000
 | regional@example.com | Regional Manager (Midwest) | both stores, corporate view |
 
 The seed builds four weeks of history for **Demo Restaurant #101** (plus #105) by calling the same functions the app uses: weekly orders with a chicken price path of $2.74 → $2.81 → $2.96 → $3.20/LB, receiving with temperatures and lots, daily POS imports, salsa production, waste, and weekly counts by three counters. Current week: a confirmed Sysco order due tomorrow and a produce delivery waiting for reconciliation.
+
+The demo uses Princess Pita's real Sysco, Greco and Commissary order-sheet items (with demo case sizes and prices) and adds Gyro Pita and Chicken Wrap to the menu. The real list for production, without invented prices, is `supabase/production/princess-pita-products.csv`.
 
 The seed also contains Sysco (ordering site `https://shop.sysco.com`), Greco, the Central Kitchen commissary with dough/marinara/meatball production, a commissary order where 100 meatballs were ordered and 95 received, today's Toast orders (including a duplicate delivery, an update, a void and an unmapped item), and email recipients.
 

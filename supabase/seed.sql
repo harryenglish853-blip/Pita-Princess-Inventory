@@ -106,7 +106,58 @@ insert into seed_products values
  ('3005','Pepperoni, Sliced','Food','Protein','LB','OZ','CASE',12.5,null,null,'Greco','GR-PEP125','2/6.25 LB',61.00,10,12,'Walk-In Cooler','Shelf 2',false,41,false,'{0.97,0.98,1,1}'),
  ('8001','Pizza Dough Ball, 16 oz','Food','Prepared','EA','EA','PAN',12,null,null,'Commissary','CM-DOUGH','12 EA pan',0,110,100,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
  ('8002','Marinara Sauce','Food','Prepared','LB','OZ','CTN',5,null,null,'Commissary','CM-MARINARA','5 LB container',0,30,25,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
- ('8003','Meatballs, 2 oz','Food','Prepared','EA','EA','PAN',50,null,null,'Commissary','CM-MEATBALL','50 EA pan',0,90,80,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}');
+ ('8003','Meatballs, 2 oz','Food','Prepared','EA','EA','PAN',50,null,null,'Commissary','CM-MEATBALL','50 EA pan',0,90,80,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('9001','Chicken Thigh, Boneless','Food','Protein','LB','OZ','CASE',40,null,null,'Sysco','SY-9001','4/10 LB',118.0,60,70,'Walk-In Cooler','Shelf 2',false,41,true,'{1,1,1,1}'),
+ ('9002','Soda Syrup (bag-in-box)','Beverage','Soft Drinks','GAL','FL OZ','BOX',5,null,null,'Sysco','SY-9002','5 GAL BIB',96.0,5,10,'Dry Storage B','Floor',false,null,false,'{1,1,1,1}'),
+ ('9003','Ketchup, #10 Can','Food','Condiments','CAN','CAN','CASE',6,null,null,'Sysco','SY-9003','6/#10',39.0,4,6,'Dry Storage A','Rack 4',false,null,false,'{1,1,1,1}'),
+ ('9004','Ketchup Packets','Paper','Disposables','EA','EA','CASE',1000,null,null,'Sysco','SY-9004','1000 CT',29.0,800,1000,'Front Storage','Shelf 2',false,null,false,'{1,1,1,1}'),
+ ('9005','Sriracha Bottles','Food','Condiments','BTL','BTL','CASE',12,null,null,'Sysco','SY-9005','12/17 OZ',38.0,6,12,'Dry Storage A','Rack 4',false,null,false,'{1,1,1,1}'),
+ ('9006','Detergent (Dishwasher Liquid)','Supplies','Chemicals','JUG','JUG','CASE',4,null,null,'Sysco','SY-9006','4/1 GAL',64.0,2,4,'Chemical Storage','Shelf 1',false,null,false,'{1,1,1,1}'),
+ ('9007','Flour Tortillas 13.5"','Food','Bakery','EA','EA','CASE',72,null,null,'Sysco','SY-9007','6/12 CT',32.0,140,144,'Dry Storage A','Rack 2',false,null,false,'{1,1,1,1}'),
+ ('9008','Red Onion','Food','Produce','LB','OZ','BAG',25,null,null,'Sysco','SY-9008','25 LB',24.0,30,25,'Walk-In Cooler','Shelf 3',false,null,true,'{1,1,1,1}'),
+ ('9009','Red Bell Peppers','Food','Produce','LB','OZ','CASE',25,null,null,'Sysco','SY-9009','25 LB',46.0,20,20,'Walk-In Cooler','Shelf 3',false,null,true,'{1,1,1,1}'),
+ ('9010','Green Bell Peppers','Food','Produce','LB','OZ','CASE',25,null,null,'Sysco','SY-9010','25 LB',34.0,20,20,'Walk-In Cooler','Shelf 3',false,null,true,'{1,1,1,1}'),
+ ('9011','Persian Cucumbers','Food','Produce','LB','OZ','CASE',10,null,null,'Sysco','SY-9011','10 LB',22.0,25,20,'Walk-In Cooler','Shelf 3',false,null,true,'{1,1,1,1}'),
+ ('9101','Gyro Cone (Halal)','Food','Protein','LB','OZ','CASE',20,null,null,'Greco','GR-9101','2/10 LB',92.0,60,60,'Walk-In Freezer','Shelf 1',false,10,false,'{1,1,1,1}'),
+ ('9102','Kalamata Olives','Food','Dry Goods','LB','OZ','CASE',12,null,null,'Greco','GR-9102','2/6 LB',54.0,6,8,'Dry Storage A','Rack 3',false,null,false,'{1,1,1,1}'),
+ ('9103','Oil Butter','Food','Dry Goods','GAL','FL OZ','CASE',3,null,null,'Greco','GR-9103','3/1 GAL',48.0,2,3,'Dry Storage A','Rack 3',false,null,false,'{1,1,1,1}'),
+ ('9104','Pita - Artopia','Food','Bakery','EA','EA','CASE',60,null,null,'Greco','GR-9104','6/10 CT',24.0,300,240,'Dry Storage A','Rack 2',false,null,false,'{1,1,1,1}'),
+ ('9105','Pita - Pocket 7"','Food','Bakery','EA','EA','CASE',120,null,null,'Greco','GR-9105','12/10 CT',26.0,400,360,'Dry Storage A','Rack 2',false,null,false,'{1,1,1,1}'),
+ ('9106','Pita - Jungle Pita','Food','Bakery','EA','EA','CASE',60,null,null,'Greco','GR-9106','6/10 CT',30.0,120,120,'Dry Storage A','Rack 2',false,null,false,'{1,1,1,1}'),
+ ('9107','Lemon Juice','Food','Dry Goods','GAL','FL OZ','CASE',4,null,null,'Greco','GR-9107','4/1 GAL',36.0,2,3,'Walk-In Cooler','Shelf 1',false,null,false,'{1,1,1,1}'),
+ ('9108','Vinegar','Food','Dry Goods','GAL','FL OZ','CASE',4,null,null,'Greco','GR-9108','4/1 GAL',18.0,1,2,'Dry Storage A','Rack 3',false,null,false,'{1,1,1,1}'),
+ ('9109','Pistachio Cheesecake','Food','Desserts','EA','EA','CASE',14,null,null,'Greco','GR-9109','14 slices',52.0,14,14,'Walk-In Freezer','Shelf 2',false,10,false,'{1,1,1,1}'),
+ ('9110','Baklava Cheesecake 8 oz','Food','Desserts','EA','EA','CASE',12,null,null,'Greco','GR-9110','12/8 OZ',48.0,12,12,'Walk-In Freezer','Shelf 2',false,10,false,'{1,1,1,1}'),
+ ('9111','Tongs','Supplies','Smallwares','EA','EA','PK',12,null,null,'Greco','GR-9111','12 CT',18.0,1,4,'Front Storage','Shelf 3',false,null,false,'{1,1,1,1}'),
+ ('9112','Cups 12-14 oz','Paper','Disposables','EA','EA','CASE',1000,null,null,'Greco','GR-9112','1000 CT',72.0,400,500,'Front Storage','Shelf 1',false,null,false,'{1,1,1,1}'),
+ ('9113','Spoons','Paper','Disposables','EA','EA','CASE',1000,null,null,'Greco','GR-9113','1000 CT',22.0,300,500,'Front Storage','Shelf 1',false,null,false,'{1,1,1,1}'),
+ ('9114','Plates 8.5"','Paper','Disposables','EA','EA','CASE',500,null,null,'Greco','GR-9114','500 CT',38.0,200,300,'Front Storage','Shelf 1',false,null,false,'{1,1,1,1}'),
+ ('9115','Knives','Paper','Disposables','EA','EA','CASE',1000,null,null,'Greco','GR-9115','1000 CT',22.0,200,500,'Front Storage','Shelf 1',false,null,false,'{1,1,1,1}'),
+ ('9116','Forks','Paper','Disposables','EA','EA','CASE',1000,null,null,'Greco','GR-9116','1000 CT',22.0,400,500,'Front Storage','Shelf 1',false,null,false,'{1,1,1,1}'),
+ ('9117','Trash Bags','Supplies','Kitchen Supplies','EA','EA','CASE',100,null,null,'Greco','GR-9117','100 CT',34.0,40,50,'Front Storage','Shelf 3',false,null,false,'{1,1,1,1}'),
+ ('9118','Wax Dry Sheet','Paper','Disposables','EA','EA','CASE',1000,null,null,'Greco','GR-9118','1000 CT',41.0,500,1000,'Front Storage','Shelf 2',false,null,false,'{1,1,1,1}'),
+ ('9119','Degreaser','Supplies','Chemicals','GAL','FL OZ','CASE',4,null,null,'Greco','GR-9119','4/1 GAL',52.0,1,2,'Chemical Storage','Shelf 1',false,null,false,'{1,1,1,1}'),
+ ('9120','3-Compartment Plates','Paper','Disposables','EA','EA','CASE',400,null,null,'Greco','GR-9120','400 CT',58.0,200,200,'Front Storage','Shelf 2',false,null,false,'{1,1,1,1}'),
+ ('9121','1-Compartment Plates','Paper','Disposables','EA','EA','CASE',400,null,null,'Greco','GR-9121','400 CT',49.0,150,200,'Front Storage','Shelf 2',false,null,false,'{1,1,1,1}'),
+ ('9122','Paper Towel Rolls','Supplies','Kitchen Supplies','ROLL','ROLL','CASE',12,null,null,'Greco','GR-9122','12 rolls',44.0,6,12,'Front Storage','Shelf 3',false,null,false,'{1,1,1,1}'),
+ ('9201','Lamb Chops','Food','Commissary','LB','OZ','CTN',5,null,null,'Commissary','CM-9201','5 LB ctn',70.0,0,20,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('9202','Lamb Shank','Food','Commissary','EA','EA','PAN',10,null,null,'Commissary','CM-9202','10 EA pan',65.0,0,15,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('9203','Beef Kabab','Food','Commissary','EA','EA','PAN',20,null,null,'Commissary','CM-9203','20 EA pan',60.0,0,50,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('9204','Chicken Kabab','Food','Commissary','EA','EA','PAN',20,null,null,'Commissary','CM-9204','20 EA pan',40.0,0,60,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('9205','Prepared Grilled Chicken','Food','Commissary','LB','OZ','CTN',10,null,null,'Commissary','CM-9205','10 LB ctn',45.0,0,30,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('9206','Beef Shawarma','Food','Commissary','LB','OZ','CTN',10,null,null,'Commissary','CM-9206','10 LB ctn',62.0,0,40,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('9207','Chicken Shawarma','Food','Commissary','LB','OZ','CTN',10,null,null,'Commissary','CM-9207','10 LB ctn',38.0,0,50,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('9208','Dolmas','Food','Commissary','EA','EA','PAN',50,null,null,'Commissary','CM-9208','50 EA pan',15.0,0,100,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('9209','Pickles','Food','Commissary','LB','OZ','CTN',5,null,null,'Commissary','CM-9209','5 LB ctn',9.0,0,10,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('9210','Rice, Cooked (Commissary)','Food','Commissary','LB','OZ','CTN',10,null,null,'Commissary','CM-9210','10 LB ctn',8.0,0,40,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('9211','Feta Cheese','Food','Commissary','LB','OZ','CTN',5,null,null,'Commissary','CM-9211','5 LB ctn',27.0,0,10,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('9212','Hummus','Food','Commissary','LB','OZ','CTN',5,null,null,'Commissary','CM-9212','5 LB ctn',14.0,0,25,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('9213','Greek Dressing','Food','Commissary','QT','FL OZ','CTN',4,null,null,'Commissary','CM-9213','4 QT ctn',10.0,0,8,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('9214','Tzatziki','Food','Commissary','LB','OZ','CTN',5,null,null,'Commissary','CM-9214','5 LB ctn',15.0,0,15,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('9215','Garlic Sauce','Food','Commissary','LB','OZ','CTN',5,null,null,'Commissary','CM-9215','5 LB ctn',12.0,0,15,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('9216','Tahini','Food','Commissary','LB','OZ','CTN',5,null,null,'Commissary','CM-9216','5 LB ctn',22.0,0,8,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('9217','Walnut Baklava','Food','Commissary','EA','EA','PAN',40,null,null,'Commissary','CM-9217','40 EA pan',28.0,0,80,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}'),
+ ('9218','Pistachio Baklava','Food','Commissary','EA','EA','PAN',40,null,null,'Commissary','CM-9218','40 EA pan',34.0,0,60,'Walk-In Cooler','Shelf 4',false,41,true,'{1,1,1,1}');
 
 grant select on seed_products to authenticated;
 
@@ -136,7 +187,7 @@ declare
 begin
   -- ---------------------------------------------------------------- organization
   perform seed.as_user(v_owner);
-  v_org := public.create_organization('Pita Princess Restaurant Group', 'Demo Restaurant', '101', 'America/New_York');
+  v_org := public.create_organization('Princess Pita', 'Princess Pita Demo', '101', 'America/New_York');
   select id into v_loc from public.locations where organization_id = v_org and code = '101';
   update public.locations set address_line1 = '101 Main Street', city = 'Springfield', state = 'IL', phone = '(555) 010-0101' where id = v_loc;
   insert into public.regions (organization_id, name, code) values (v_org, 'Midwest', 'MW') returning id into v_region;
@@ -254,7 +305,7 @@ begin
          count_daily = sp.daily, count_weekly = true
   from seed_products sp join public.products pr on pr.product_number = sp.num
   where pr.organization_id = v_org and lp.product_id = pr.id;
-  update public.location_products lp set active = (pr.product_number in ('1002', '2002', '2004', '4003', '4005', '8001', '8002', '8003'))
+  update public.location_products lp set active = (pr.product_number in ('1002', '2002', '2004', '4003', '4005', '8001', '8002', '8003') or pr.product_number like '92%')
   from public.products pr where pr.id = lp.product_id and lp.location_id = v_comm;
   update public.location_products set par_mode = 'dynamic' where product_id in (select id from public.products where organization_id = v_org and product_number in ('1001', '2001'))
     and location_id = v_loc;
@@ -277,6 +328,8 @@ begin
     ('French Fries', 'menu_item', 1, 'EA', null, '[["P","4001",6,"OZ"]]', 2.95, 'P400', 230, 'Sides'),
     ('Chips & Salsa', 'menu_item', 1, 'EA', null, '[["R","Salsa",4,"OZ"]]', 3.50, 'P410', 160, 'Sides'),
     ('Guacamole', 'menu_item', 1, 'EA', null, '[["P","2001",2,"EA"],["P","2004",0.5,"OZ"]]', 4.50, 'P420', 70, 'Sides'),
+    ('Gyro Pita', 'menu_item', 1, 'EA', null, '[["P","9101",5,"OZ"],["P","9105",1,"EA"],["P","2002",1,"OZ"],["P","9008",0.5,"OZ"]]', 10.95, 'P500', 180, 'Entrees'),
+    ('Chicken Wrap', 'menu_item', 1, 'EA', null, '[["P","9001",6,"OZ"],["P","9007",1,"EA"],["P","2003",0.1,"EA"],["P","9011",1,"OZ"],["P","9010",1,"OZ"]]', 9.95, 'P510', 120, 'Entrees'),
     ('Coca-Cola', 'menu_item', 1, 'EA', null, '[["P","5001",1,"EA"]]', 2.25, 'B100', 115, 'Beverages'),
     ('Sprite', 'menu_item', 1, 'EA', null, '[["P","5002",1,"EA"]]', 2.25, 'B110', 58, 'Beverages'),
     ('IPA Pint', 'menu_item', 1, 'EA', null, '[["P","5003",16,"FL OZ"]]', 5.50, 'B200', 115, 'Bar'),

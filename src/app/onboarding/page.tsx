@@ -20,7 +20,7 @@ export default async function OnboardingPage() {
           You will be the System Owner. If you were expecting to join an existing restaurant, ask your manager to add {session.user.email}.
         </p>
         <ActionForm action={createOrganization} redirectTo="/" className="space-y-3">
-          <Field label="Company / group name"><Input name="org_name" required placeholder="Pita Princess Restaurant Group" /></Field>
+          <Field label="Company / group name"><Input name="org_name" required placeholder="Princess Pita Restaurant Group" /></Field>
           <div className="grid grid-cols-3 gap-3">
             <Field label="Store #" className="col-span-1"><Input name="location_code" required placeholder="101" /></Field>
             <Field label="Restaurant name" className="col-span-2"><Input name="location_name" required placeholder="Downtown" /></Field>

@@ -27,7 +27,7 @@ You will create the whole setup **twice**: first **staging** (a copy for testing
 
 1. resend.com → sign up → **Domains → Add domain** (e.g. `pitaprincess.com`) → add the DNS records it shows at your domain registrar → wait until **Verified**.
 2. **API Keys → Create** (sending access). Copy it.
-3. Choose the sender, e.g. `Pita Princess Inventory <reports@pitaprincess.com>` (must use the verified domain).
+3. Choose the sender, e.g. `Princess Pita Inventory <reports@yourdomain.com>` (must use the verified domain).
 
 ## 4. Website (Vercel)
 
@@ -58,7 +58,11 @@ You will create the whole setup **twice**: first **staging** (a copy for testing
 
 ## 7. In the app
 
-Open **Getting started** and follow it (products, shelf order, team, first count). Then:
+Open **Getting started** and follow it (products, shelf order, team, first count).
+
+**Products:** start from `supabase/production/princess-pita-products.csv`. It lists the 58 items on the Sysco, Greco and Commissary order sheets (plus the handwritten additions), with vendor, category, storage area and a suggested count unit. Before importing, open it in Excel or Google Sheets and fill in what only you know: **Case unit, Per case, Case price, Vendor item # and Par**, and check the *Please confirm* column (e.g. is lettuce counted by the head or by the pound?). Create the commissary location first (Administration → Locations → Type: Commissary); the *Commissary* vendor then links to it automatically. Inventory → **Import from spreadsheet** → upload → check the preview → Import. You can re-import the same file later with more columns filled in: matching items are updated, never duplicated.
+
+Then:
 
 - **Vendors**: Sysco, Greco (Kind: Distributor) with delivery days, cutoff, lead time, minimum and **Ordering website** (Sysco: `https://shop.sysco.com` or your account's URL; Greco: the address Greco gave you). Passwords for vendor sites are never stored here.
 - **Commissary**: Administration → Locations → add the central kitchen (kind: Commissary). Add a vendor named *Commissary*, kind *Commissary*, linked to that location, with the items it supplies on its order guide.

@@ -1,0 +1,59 @@
+Item name,Item #,Category,Type,Count unit,Case unit,Per case,Vendor,Vendor item #,Case price,Storage area,Shelf,Par,UPC,Please confirm
+"Fryer Oil, Soybean",,Dry Goods,Food,LB,,,Sysco,,,Dry Storage,,,,Sheet says 'soybean oil'. Count unit LB or JUG? Add Per case (e.g. 35 LB jug)
+French Fries,,Frozen,Food,LB,,,Sysco,,,Walk-In Freezer,,,,Count in LB or CASE? Add Per case
+Chicken Breast,,Protein,Food,LB,,,Sysco,,,Walk-In Cooler,,,,Add Per case (e.g. 40 LB)
+Chicken Thigh,,Protein,Food,LB,,,Sysco,,,Walk-In Cooler,,,,Add Per case
+Soda Syrup,,Beverage,Beverage,BOX,,,Sysco,,,Dry Storage,,,,Bag-in-box: count by BOX?
+Ketchup,,Condiments,Food,CAN,,,Sysco,,,Dry Storage,,,,#10 cans? Add Per case
+Ketchup Packets,,Condiments,Paper,CASE,,,Sysco,,,Dry Storage,,,,Counted by the case?
+Sriracha Bottles,,Condiments,Food,BTL,,,Sysco,,,Dry Storage,,,,Add bottles per case
+Sanitizer,,Chemicals,Supplies,GAL,,,Sysco,,,Chemical Storage,,,,Add Per case
+Detergent (Dishwasher Liquid),,Chemicals,Supplies,JUG,,,Sysco,,,Chemical Storage,,,,Add jugs per case
+"13.5"" Flour Tortillas",,Bakery,Food,PK,,,Sysco,,,Dry Storage,,,,Packs per case?
+Tomatoes,,Produce,Food,LB,,,Sysco,,,Walk-In Cooler,,,,Sheet says best price: add the other vendor too if you compare
+Red Onion,,Produce,Food,LB,,,Sysco,,,Walk-In Cooler,,,,Best price item
+Red Bell Peppers,,Produce,Food,LB,,,Sysco,,,Walk-In Cooler,,,,Best price item
+Green Bell Peppers,,Produce,Food,LB,,,Sysco,,,Walk-In Cooler,,,,Best price item
+Persian Cucumbers,,Produce,Food,LB,,,Sysco,,,Walk-In Cooler,,,,Best price item
+Lettuce,,Produce,Food,EA,,,Sysco,,,Walk-In Cooler,,,,Heads (EA) or LB? Best price item
+Gyro Cone (Halal),,Protein,Food,EA,,,Greco,,,Walk-In Freezer,,,,Cone weight / cones per case?
+Kalamata Olives,,Dry Goods,Food,EA,,,Greco,,,Dry Storage,,,,"Jar, can or pail? Set the count unit"
+Oil Butter,,Dry Goods,Food,EA,,,Greco,,,Dry Storage,,,,Container size?
+Pita - Artopia,,Bakery,Food,PK,,,Greco,,,Dry Storage,,,,Packs per case?
+"Pita - Pocket 7""",,Bakery,Food,PK,,,Greco,,,Dry Storage,,,,Packs per case?
+Pita - Jungle Pita,,Bakery,Food,PK,,,Greco,,,Dry Storage,,,,Packs per case?
+Lemon Juice,,Dry Goods,Food,BTL,,,Greco,,,Walk-In Cooler,,,,Bottle size?
+Vinegar,,Dry Goods,Food,GAL,,,Greco,,,Dry Storage,,,,
+Pistachio Cheesecake,,Desserts,Food,EA,,,Greco,,,Walk-In Freezer,,,,Slices or whole cakes?
+Baklava Cheesecake 8 oz,,Desserts,Food,EA,,,Greco,,,Walk-In Freezer,,,,
+Tongs,,Smallwares,Supplies,EA,,,Greco,,,Front Storage,,,,
+Cups 12-14 oz,,Disposables,Paper,SLEEVE,,,Greco,,,Front Storage,,,,Sleeves per case?
+Spoons,,Disposables,Paper,BOX,,,Greco,,,Front Storage,,,,
+"Plates 8.5""",,Disposables,Paper,PK,,,Greco,,,Front Storage,,,,
+Knives,,Disposables,Paper,BOX,,,Greco,,,Front Storage,,,,
+Forks,,Disposables,Paper,BOX,,,Greco,,,Front Storage,,,,
+Trash Bags,,Disposables,Supplies,BOX,,,Greco,,,Front Storage,,,,
+Wax Dry Sheet,,Disposables,Paper,BOX,,,Greco,,,Front Storage,,,,
+Napkins,,Disposables,Paper,PK,,,Greco,,,Front Storage,,,,
+Degreaser,,Chemicals,Supplies,JUG,,,Greco,,,Chemical Storage,,,,
+3-Compartment Plates,,Disposables,Paper,PK,,,Greco,,,Front Storage,,,,
+1-Compartment Plates,,Disposables,Paper,PK,,,Greco,,,Front Storage,,,,
+Paper Towel Rolls,,Disposables,Supplies,ROLL,,,Greco,,,Front Storage,,,,Handwritten on the Greco sheet
+Lamb Chops,,Commissary,Food,LB,,,Commissary,,,Walk-In Cooler,,,,Count by LB or pieces (EA)?
+Lamb Shank,,Commissary,Food,EA,,,Commissary,,,Walk-In Cooler,,,,
+Beef Kabab,,Commissary,Food,EA,,,Commissary,,,Walk-In Cooler,,,,Skewers (EA)?
+Chicken Kabab,,Commissary,Food,EA,,,Commissary,,,Walk-In Cooler,,,,Skewers (EA)?
+Prepared Grilled Chicken,,Commissary,Food,LB,,,Commissary,,,Walk-In Cooler,,,,
+Beef Shawarma,,Commissary,Food,CTN,,,Commissary,,,Walk-In Cooler,,,,Handwritten '1 contenedor': container size in LB?
+Chicken Shawarma,,Commissary,Food,CTN,,,Commissary,,,Walk-In Cooler,,,,Container size in LB?
+Dolmas,,Commissary,Food,EA,,,Commissary,,,Walk-In Cooler,,,,Pieces or containers?
+Pickles,,Commissary,Food,CTN,,,Commissary,,,Walk-In Cooler,,,,
+Rice,,Commissary,Food,CTN,,,Commissary,,,Walk-In Cooler,,,,Cooked rice from the commissary
+Feta Cheese,,Commissary,Food,LB,,,Commissary,,,Walk-In Cooler,,,,
+Hummus,,Commissary,Food,CTN,,,Commissary,,,Walk-In Cooler,,,,Container size?
+Greek Dressing,,Commissary,Food,CTN,,,Commissary,,,Walk-In Cooler,,,,
+Tzatziki,,Commissary,Food,CTN,,,Commissary,,,Walk-In Cooler,,,,
+Garlic Sauce,,Commissary,Food,CTN,,,Commissary,,,Walk-In Cooler,,,,
+Tahini,,Commissary,Food,CTN,,,Commissary,,,Walk-In Cooler,,,,
+Walnut Baklava,,Commissary,Food,EA,,,Commissary,,,Dry Storage,,,,Pieces or trays?
+Pistachio Baklava,,Commissary,Food,EA,,,Commissary,,,Dry Storage,,,,Pieces or trays?

@@ -152,6 +152,15 @@ begin
   perform tests.assert((select bool_and(unit_cost is null) from public.commissary_order_lines(v_order)), 'employees do not see commissary costs');
   perform tests.logout();
 
+  -- a vendor called "Commissary" (e.g. created by the spreadsheet import) links to the only commissary location
+  perform tests.login(v_owner);
+  insert into public.vendors (organization_id, name) values (v_org, 'Commissary Imported') returning id into v_order2;
+  perform tests.assert((select kind = 'commissary' and supplying_location_id = v_comm from public.vendors where id = v_order2),
+                       'an imported "Commissary" vendor links to the commissary location');
+  insert into public.vendors (organization_id, name) values (v_org, 'Sysco Imported') returning id into v_order2;
+  perform tests.assert((select kind from public.vendors where id = v_order2) = 'distributor', 'other vendors stay distributors');
+  perform tests.logout();
+
   raise notice 'ALL COMMISSARY TESTS PASSED';
 end $$;
 rollback;

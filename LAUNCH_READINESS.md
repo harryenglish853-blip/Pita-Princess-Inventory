@@ -14,7 +14,7 @@ The software passes every automated check below with **0 known critical and 0 kn
 | 2 | Vercel staging + production deployments with all environment variables (DEPLOY.md §4) | BLOCKED — REQUIRES EXTERNAL CONFIGURATION |
 | 3 | Resend account with the restaurant's sending domain verified; one real email of each type received and read on a phone | BLOCKED — REQUIRES EXTERNAL CONFIGURATION |
 | 4 | Supabase Pro backups on; a restore into a scratch project performed and timed (DEPLOY.md §9) | BLOCKED — REQUIRES EXTERNAL CONFIGURATION |
-| 5 | Real restaurant data entered on production (products, case sizes, costs, pars, shelf order, vendors, recipes, employees + PINs, recipients) | BLOCKED — REQUIRES RESTAURANT INFORMATION |
+| 5 | Real restaurant data entered on production. The 58 products from the Sysco/Greco/Commissary order sheets are ready in `supabase/production/princess-pita-products.csv` (imports with 0 errors); still needed: case sizes, case prices, vendor item #s, pars, shelf order, recipes, employees + PINs, email recipients | BLOCKED — REQUIRES RESTAURANT INFORMATION |
 | 6 | Greco's real ordering website URL and Sysco account URL entered | BLOCKED — REQUIRES RESTAURANT INFORMATION |
 | 7 | Toast: either partner API access + webhook secret, or the daily export routine agreed with the managers | BLOCKED — REQUIRES EXTERNAL CONFIGURATION |
 | 8 | Owner acceptance checklist below signed on **staging** | NOT YET VERIFIED |
@@ -46,8 +46,8 @@ Toast scheduled API pull and menu import; vendor API/EDI ordering; Realtime upda
 | Suite | Result |
 |---|---|
 | TypeScript (`npm run typecheck`) | pass |
-| Unit tests (`npm test`) | 43 / 43 pass (unit engine, calculator, voice parser, POS + Toast adapters, product import, order list, email templates) |
-| SQL workflow tests under RLS (`npm run test:db`) | 11 suites, 316 assertions, all pass; runner now fails on any skipped suite |
+| Unit tests (`npm test`) | 46 / 46 pass (unit engine, calculator, voice parser, POS + Toast adapters, product import, order list, email templates) |
+| SQL workflow tests under RLS (`npm run test:db`) | 11 suites, 318 assertions, all pass; runner now fails on any skipped suite |
 | End-to-end (`npm run test:e2e`, production build) | 50 tests pass: desktop 1440×900, Pixel 7 phone, iPad (gen 7) |
 | Production build (`npm run build`) | pass, no warnings |
 | `setup.sql` applied to a blank database in a single transaction | pass (66 tables, 110 API functions) |
@@ -102,7 +102,8 @@ Tick each item yourself in the app; do not assume it is right because the softwa
 - [ ] The management login sees management screens and no Administration → Email or user setup it should not
 - [ ] The shared employee login lists exactly our employees; each person's PIN works; a wrong PIN is refused; an employee sees only Receive / Waste / Transfer / Tasks
 - [ ] Correct managers listed under Users, with the right roles and stores
-- [ ] Correct products, categories, case sizes and units (1 case = ? LB for each counted-by-case item)
+- [ ] Correct products, categories, case sizes and units (1 case = ? LB for each counted-by-case item); every *Please confirm* note in `princess-pita-products.csv` answered
+- [ ] Restaurant name spelled as you want it everywhere (the order sheets say **Princess Pita**)
 - [ ] Correct product costs and par levels for the top 20 items
 - [ ] Storage areas and the weekly count walking order match the walk-in, freezer and dry storage shelves
 - [ ] Vendors: Sysco and Greco delivery days, cutoff times, lead times, minimums and account numbers
