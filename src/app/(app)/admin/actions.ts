@@ -77,11 +77,12 @@ export async function saveLocation(id: string | null, _: ActionState, fd: FormDa
       invoice_tolerance: optNum(fd, "invoice_tolerance") ?? "1",
       price_alert_pct: optNum(fd, "price_alert_pct") ?? "5",
       active: fd.get("active") !== null ? fd.get("active") === "on" : true,
+      kind: str(fd, "kind") === "commissary" ? "commissary" : "restaurant",
     };
     // Store managers with settings.manage may change operating tolerances, not the hierarchy.
     if (id && !canOrg(ctx, "locations.manage")) {
       if (!can(ctx, "settings.manage", id)) return fail({ message: "You do not have permission to change this location." });
-      for (const k of ["name", "code", "region_id", "district_id", "market", "active"]) delete row[k];
+      for (const k of ["name", "code", "region_id", "district_id", "market", "active", "kind"]) delete row[k];
     }
     const { data, error } = id
       ? await supabase.from("locations").update(row).eq("id", id).select("id")

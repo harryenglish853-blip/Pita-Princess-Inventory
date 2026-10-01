@@ -62,6 +62,11 @@ scripts/local-stack/     Docker-free Supabase-compatible stack for dev/CI
 | 27–31 | POS & food cost | Adapter-neutral POS import, theoretical usage, actual vs theoretical with drill-downs |
 | 40–41 | Reports & export | Valuation, efficiency/turns/aging, count summaries, ledger, adjustments, purchases, price variance, price changes, vendor performance, order accuracy, lot recall; CSV, Excel, print/PDF, saved views |
 | 45–46 | Users, permissions, audit | 11 roles, 30 granular permissions, scoped assignments, audit log viewer |
+| — | Shared employee login | "Who are you?" name picker + personal 4-digit PIN (hashed, lockout after 5 tries); every ledger row, audit entry, waste log and count records the person; nothing can be changed until someone is identified |
+| — | Ordering center | Sysco / Greco cards: next delivery, order-by cutoff, suggested items and estimate, **View suggested order** (with WHY?), **Copy order list**, **Open vendor website**, **Mark as ordered** (counts as incoming; delivery checked against it) |
+| — | Commissary | Central kitchen as an internal supplier: orders DRAFT → SUBMITTED → ACCEPTED → PREPARING → READY → IN TRANSIT → RECEIVED, email to the commissary, ship/receive ledger moves, differences flagged and alerted, production costing |
+| — | Toast | Order-level sync keyed by Toast GUID: repeats, out-of-order events, updates, refunds, voids and removed items never double count; unmapped items listed until mapped; HMAC-verified webhook; daily file import still supported |
+| — | Email | Owner-managed recipients per report; daily, weekly and monthly reports; immediate alerts (rate limited); stock digests; vendor cutoff reminders; outbox with preview, retry and dedupe; Resend |
 
 ## Ordering is optional
 
@@ -96,7 +101,9 @@ npm run dev              # http://localhost:3000
 
 | Email | Role | Sees |
 |---|---|---|
-| owner@example.com | System Owner (all locations) | everything, corporate scorecard |
+| owner@example.com, owner2@example.com | System Owner (all locations) | everything, corporate scorecard, email settings |
+| employee@example.com | **Shared employee login** (#101) | pick John `2580`, Maria `3691`, Carlos `4826` or Alex `5937`; simple home: receive, waste, transfer, tasks |
+| commissary@example.com | Kitchen Manager, Central Kitchen (C1) | commissary orders to accept, prepare and ship; production |
 | gm@example.com | General Manager, #101 | store operations, costs, posting, overrides |
 | kitchen@example.com | Kitchen Manager, #101 | ordering, counts, production |
 | maria@example.com, john@example.com, carlos@example.com | Employees, #101 | count, receive, log waste |
@@ -104,6 +111,8 @@ npm run dev              # http://localhost:3000
 | regional@example.com | Regional Manager (Midwest) | both stores, corporate view |
 
 The seed builds four weeks of history for **Demo Restaurant #101** (plus #105) by calling the same functions the app uses: weekly orders with a chicken price path of $2.74 → $2.81 → $2.96 → $3.20/LB, receiving with temperatures and lots, daily POS imports, salsa production, waste, and weekly counts by three counters. Current week: a confirmed Sysco order due tomorrow and a produce delivery waiting for reconciliation.
+
+The seed also contains Sysco (ordering site `https://shop.sysco.com`), Greco, the Central Kitchen commissary with dough/marinara/meatball production, a commissary order where 100 meatballs were ordered and 95 received, today's Toast orders (including a duplicate delivery, an update, a void and an unmapped item), and email recipients.
 
 **Never run `supabase/seed.sql` against production.**
 
@@ -124,18 +133,20 @@ You can do the same week through the UI with the demo logins (Purchasing → Rec
 ```bash
 npm run typecheck
 npm test            # unit: voice parser, calculator, unit engine, POS adapters, CSV
-npm run test:db     # SQL workflows as real users under RLS (Phases 1–6 + sample week)
+npm run test:db     # 11 SQL suites, 316 assertions, as real users under RLS (fails if any suite is skipped)
 npm run build && npm start
-npm run test:e2e    # Playwright: permissions, offline counting + reload with no network,
-                    # order → short delivery → back order → reconcile, waste, all pages, phone layouts
+npm run test:e2e    # Playwright (desktop, phone, iPad): the specification's demo flow end to end,
+                    # shared login + PIN, permissions per role, offline counting, every page per role, layouts
 ```
 
 ## Production notes
 
 - Deploy the database with `supabase db push` (migrations only — not the seed). Create the first user by signing up; onboarding creates the organization and makes them System Owner.
-- Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (server only) and optionally `ANTHROPIC_API_KEY` for invoice scanning.
+- Environment variables are listed in `.env.example` and DEPLOY.md (Supabase, `APP_URL`, `CRON_SECRET`, `RESEND_API_KEY`, `EMAIL_FROM`, `TOAST_WEBHOOK_SECRET`, optional `ANTHROPIC_API_KEY`). Secrets are server-only; only the Supabase URL and publishable key reach the browser.
+- Financial data is enforced in the database: report functions are private and the app calls `get_*` wrappers that require `reports.view_cost` / `reports.view`; sales are hidden from employees.
 - Stock and operational alerts (late delivery, order not submitted, expiring lots, high waste, high count variance, unusual usage) refresh when the dashboard loads, after counts and POS imports, and every 30 minutes through `app.refresh_all_alerts()`. The migration schedules that with `pg_cron` when the extension is available (hosted Supabase); elsewhere, run `select app.refresh_all_alerts();` from any scheduler as the database owner.
-- POS: Toast and Square file exports work today; API adapters (Clover, MICROS, Aloha, Lightspeed) plug into `src/lib/pos/adapters.ts` and still import through the same `import_sales` function.
+- POS: Toast orders sync through `/api/toast/webhook` (needs Toast partner API access) or a JSON upload; daily Toast/Square/CSV exports still import through `import_sales`. A day is either file-imported or synced, never both.
+- Email: `/api/cron/email` (every 15 minutes via `vercel.json`) queues due reports and sends the outbox through Resend.
 - Offline: counts are stored in IndexedDB and synced in batches with idempotency keys; entries never leave the device queue until the server confirms them. Sign-out warns if anything is unsynced.
 
 ## What is next

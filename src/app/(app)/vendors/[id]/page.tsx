@@ -129,7 +129,7 @@ export default async function VendorPage({ params }: { params: Promise<{ id: str
       </div>
       <Card title="Vendor details" className="mt-4">
         <ActionForm action={saveVendor.bind(null, id)}>
-          <VendorFields vendor={vendor} disabled={!edit} />
+          <VendorFields vendor={vendor} disabled={!edit} locations={ctx.locations} />
           {edit ? <div className="mt-3 flex justify-end"><SubmitButton>Save vendor</SubmitButton></div> : null}
         </ActionForm>
       </Card>

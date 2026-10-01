@@ -349,10 +349,11 @@ language sql stable security definer set search_path = public as $$
   where p_location in (select app.user_location_ids()) and app.has_permission('sales.import', p_location)
 $$;
 
--- Toast failures email the owners who asked for them.
+-- Toast failures email the owners who asked for them. (Compared as text: the
+-- sync_failure enum value may be new in this same transaction.)
 create or replace function app.alert_email_kind(p_type public.alert_type) returns text
 language sql immutable as $$
-  select case p_type
+  select case p_type::text
     when 'high_waste' then 'waste_alert'
     when 'high_variance' then 'variance_alert'
     when 'short_delivery' then 'delivery_discrepancy'

@@ -12,6 +12,8 @@ const fields = (fd: FormData) => ({
   lead_time_days: Number(str(fd, "lead_time_days") || 1), order_cutoff: optStr(fd, "order_cutoff"),
   minimum_order: optNum(fd, "minimum_order") ?? "0", freight_rules: optStr(fd, "freight_rules"),
   payment_terms: optStr(fd, "payment_terms"), notes: optStr(fd, "notes"), active: fd.has("active") ? bool(fd, "active") : true,
+  kind: ["distributor", "commissary", "other"].includes(str(fd, "kind")) ? str(fd, "kind") : "distributor",
+  supplying_location_id: str(fd, "kind") === "commissary" ? optStr(fd, "supplying_location_id") : null,
 });
 
 export async function saveVendor(id: string | null, _: ActionState, fd: FormData): Promise<ActionState<{ id: string }>> {

@@ -1,71 +1,93 @@
 # Going live
 
-Two free accounts hold the app and your data: **Supabase** (the database and logins) and **Vercel** (the website). Both should be in your name. Setup takes about 30 minutes at a computer.
+Read **[LAUNCH_READINESS.md](LAUNCH_READINESS.md)** first. Real restaurant operations go on the system only after the owner acceptance checklist in that file is signed off on **staging**.
 
-Keep the keys from step 3 private. Don't email them, text them, or paste them into a chat.
+Three accounts hold the app and your data: **Supabase** (database and logins), **Vercel** (the website) and **Resend** (email). All should be in the owner's name. Keep every key private: never email, text or paste them into a chat.
 
-## 1. Create the database (Supabase)
+You will create the whole setup **twice**: first **staging** (a copy for testing, may hold demo data), then **production** (real data only, never demo data). Use separate Supabase projects and separate Vercel projects or environments.
 
-1. Go to supabase.com and sign up (or sign in with GitHub).
-2. **New project**. Name: `pita-princess`. Set a database password and save it somewhere safe. Region: the one closest to the restaurant. Click **Create new project** and wait about two minutes.
-3. Open this file on GitHub: `supabase/production/setup.sql` on branch `claude/restaurant-inventory-system-evn63l`. Click **Raw**, select all, copy.
-4. In Supabase: **SQL Editor** → **New query** → paste → **Run**. You should see *Success. No rows returned*. (It contains no demo data.)
+## 1. Database (Supabase)
 
-## 2. Copy three values from Supabase
+1. supabase.com → **New project**. Name it `pita-princess-staging` (later `pita-princess-production`). Save the database password. Region: closest to the restaurant.
+2. Open `supabase/production/setup.sql` from this repository (branch `claude/restaurant-inventory-system-ghk30b`) → **Raw** → select all → copy.
+3. Supabase → **SQL Editor** → **New query** → paste → **Run**. Expect *Success. No rows returned*. It contains no demo data.
+4. **Staging only, optional:** to try the app with the demo restaurant, also run `supabase/seed.sql` the same way. **Never run `seed.sql` on production.**
 
-In your project, click **Connect** (top of the page) or open **Project Settings → API Keys** and **Data API**:
+## 2. Values to copy from Supabase
 
-| Name in Vercel | Where it is in Supabase |
+**Project Settings → API Keys / Data API**:
+
+| Vercel variable | Where it is |
 |---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Project URL, like `https://abcd1234.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_URL` | Project URL (`https://abcd1234.supabase.co`) |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | The **publishable** key (older projects: **anon public**) |
 | `SUPABASE_SERVICE_ROLE_KEY` | The **secret** key (older projects: **service_role**). Server only. |
 
-## 3. Put the website online (Vercel)
+## 3. Email (Resend)
 
-1. Go to vercel.com and sign up **with GitHub** (the account that owns `Pita-Princess-Inventory`).
-2. **Add New… → Project** → find `Pita-Princess-Inventory` → **Import**. If it isn't listed, click *Adjust GitHub App Permissions* and allow that repository.
-3. Open **Environment Variables** and add the three values from step 2. Optional: `ANTHROPIC_API_KEY` turns on invoice photo scanning; everything else works without it.
-4. Click **Deploy** and wait about three minutes. Vercel shows your address, like `https://pita-princess-inventory.vercel.app`.
+1. resend.com → sign up → **Domains → Add domain** (e.g. `pitaprincess.com`) → add the DNS records it shows at your domain registrar → wait until **Verified**.
+2. **API Keys → Create** (sending access). Copy it.
+3. Choose the sender, e.g. `Pita Princess Inventory <reports@pitaprincess.com>` (must use the verified domain).
 
-## 4. Connect logins to your address (Supabase)
+## 4. Website (Vercel)
 
-**Authentication → URL Configuration**:
+1. vercel.com → sign up **with GitHub** → **Add New → Project** → import `Pita-Princess-Inventory`.
+2. **Settings → Environment Variables**:
 
-- **Site URL**: your Vercel address.
-- **Redirect URLs**: add your address followed by `/**`, for example `https://pita-princess-inventory.vercel.app/**`.
+| Variable | Value |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | from step 2 |
+| `APP_URL` | the site's address, e.g. `https://inventory.pitaprincess.com` (links in emails) |
+| `CRON_SECRET` | a long random string (e.g. from a password manager). Vercel sends it to the scheduled job. |
+| `RESEND_API_KEY`, `EMAIL_FROM` | from step 3 |
+| `TOAST_WEBHOOK_SECRET` | only when Toast API access is set up (step 8) |
+| `ANTHROPIC_API_KEY` | optional: invoice photo scanning |
 
-## 5. Create your owner account
+3. **Deploy.** `vercel.json` schedules `/api/cron/email` every 15 minutes (reports, alert digests, vendor-cutoff reminders, sending). Schedules more often than daily need **Vercel Pro**; a restaurant is commercial use, so plan on Pro anyway.
+4. Optional custom address: **Settings → Domains** → add `inventory.pitaprincess.com` and follow the DNS instructions. Update `APP_URL` to match.
 
-1. Open your address → **Create an account** with your name, email and a password.
-2. Confirm the email Supabase sends. If it doesn't arrive within a few minutes, turn off **Authentication → Sign In / Providers → Email → Confirm email** and sign up again.
-3. **Set up your restaurant**: company name, store number, restaurant name and time zone. You become the System Owner.
-4. Back in Supabase: **Authentication → Sign In / Providers** → turn off **Allow new users to sign up**. Everyone else is added from inside the app, so nobody else can create an account.
+## 5. Connect logins to the address (Supabase)
 
-## 6. Put it on your phone
+**Authentication → URL Configuration**: **Site URL** = your address; **Redirect URLs** = your address followed by `/**`.
 
-Open your address on the phone, then add it to the home screen: in Safari use **Share → Add to Home Screen**; in Chrome use **⋮ → Add to Home screen**. It opens like an app, and counts keep working without signal.
+## 6. Owner accounts
+
+1. Open the site → **Create an account** → confirm the email → **Set up your restaurant** (company, store number, name, time zone). You are now a System Owner.
+2. Supabase → **Authentication → Sign In / Providers** → turn **off** *Allow new users to sign up*. Everyone else is added inside the app.
+3. Administration → Users → **Add person** for the second owner, then **Grant role → System Owner → All locations**.
 
 ## 7. In the app
 
-Open **Getting started** (it's on the Home screen until everything is done). It shows each step and what's left:
+Open **Getting started** and follow it (products, shelf order, team, first count). Then:
 
-1. **Restaurant details**: address, count tolerances (Administration → Locations).
-2. **Products**: Inventory → **Import from spreadsheet**. Download the template, fill it in (or paste from your own sheet), preview, import. Vendors, categories and storage areas are created for you. You can re-import any time; matching items are updated, never duplicated.
-3. **Shelf order**: drag items into the order you walk past them. Count sheets follow it.
-4. **Team**: Administration → Users → **Add person**, with a temporary password you tell them in person. They change it under **My account**. Roles: General Manager, Kitchen Manager, Employee (counts, receives, logs waste).
-5. **First full count**: Counts → Start count → **Full inventory** → count → post. This is your starting inventory.
-6. **From then on**: log every delivery (Receive → **Log a delivery**) and all waste.
+- **Vendors**: Sysco, Greco (Kind: Distributor) with delivery days, cutoff, lead time, minimum and **Ordering website** (Sysco: `https://shop.sysco.com` or your account's URL; Greco: the address Greco gave you). Passwords for vendor sites are never stored here.
+- **Commissary**: Administration → Locations → add the central kitchen (kind: Commissary). Add a vendor named *Commissary*, kind *Commissary*, linked to that location, with the items it supplies on its order guide.
+- **Shared employee login**: Users → Add person (role Employee) → **Make shared**. Administration → **Employees & PINs**: add each person with a private 4-digit PIN.
+- **Email**: Administration → **Email reports & alerts**: add recipients and tick what each receives. Use **Generate weekly report** and **Preview** to check it, then **Send pending now** to receive a real one.
 
-Within the next two weeks, for food cost: add recipes and menu items with your POS item numbers, then import each day's sales export from the POS (Sales / POS).
+## 8. Toast (when API access is granted)
 
-## Plans and costs
+Live order sync needs Toast partner API access (request it from Toast). Then:
 
-Check current pricing on each site.
+1. In Toast's developer portal, register the webhook URL `https://<your address>/api/toast/webhook` for order events and copy the signing secret into `TOAST_WEBHOOK_SECRET` (redeploy).
+2. In the app: **Sales / Toast → Toast sync** → enter the store's Toast restaurant GUID.
+3. Map every item listed under **UNMAPPED TOAST ITEMS** to a recipe.
 
-- **Vercel**'s free Hobby plan is for non-commercial use, and a restaurant is commercial, so plan on **Pro** (about $20/month).
-- **Supabase**'s free plan pauses a project after about a week with no use and has no daily backups. Once you rely on it, move to **Pro** (about $25/month) for backups.
+Until then, import the daily Toast *Item Selection Details* export on **Sales / Toast → Daily sales**. A given day is either imported from a file or synced from Toast, never both (the app refuses the second to prevent double counting).
 
-## Updating the app
+## 9. Backups and restore
 
-Changes pushed to the GitHub branch deploy automatically. Database changes come as new files in `supabase/migrations/`. Run each new file once in the SQL Editor, in order. `scripts/build-production-sql.sh` rebuilds `setup.sql`, but that file is only for a brand-new project.
+- **Supabase Pro** (about $25/month) is required for production: daily backups with 7-day retention. Enable **Point-in-Time Recovery** if the budget allows.
+- In addition, take a weekly logical backup you control: `supabase db dump --db-url "<connection string>" -f backup-YYYY-MM-DD.sql` (or Database → Backups → Download), stored outside Supabase.
+- **Test a restore before go-live**: create a scratch Supabase project, restore the latest backup into it (Database → Backups → Restore, or `psql "<scratch connection string>" -f backup.sql`), sign in against it from a staging deployment and check that counts, receipts and the ledger are present. Write down how long it took.
+- The ledger and audit log are append-only; mistakes are corrected with new transactions, never by editing data. Never run ad-hoc `update`/`delete` statements on production.
+
+## 10. Updating the app
+
+- Code: changes merged to the deployed branch deploy automatically. Deploy to **staging first**, re-run the acceptance checks that the change touches, then promote to production.
+- Database: new files appear in `supabase/migrations/`. Apply each new file **once, in filename order**, on staging, test, then on production (SQL Editor, or `supabase db push`). `supabase/production/setup.sql` is only for a brand-new project.
+- Upgrading a database created before this release: run, in order, `20260930002200_employee_identity.sql`, `…2300_report_permissions.sql`, `…2400_ordering_center.sql`, `…2500_commissary.sql`, `…2600_email.sql`, `…2700_food_cost_rounding.sql`, `…2750_alert_sync_failure.sql` (on its own), `…2800_toast_orders.sql`.
+
+## Plans and costs (check current pricing)
+
+Vercel Pro (~$20/month), Supabase Pro (~$25/month), Resend (free tier covers a few thousand emails/month), a domain (~$15/year).

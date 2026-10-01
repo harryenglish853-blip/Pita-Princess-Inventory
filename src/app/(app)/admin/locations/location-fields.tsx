@@ -11,6 +11,7 @@ export function LocationFields({ loc, regions, districts, hierarchyEditable }: {
         <Field label="Store #"><Input name="code" required defaultValue={s(loc, "code")} /></Field>
         <Field label="Name" className="lg:col-span-2"><Input name="name" required defaultValue={s(loc, "name")} /></Field>
         <Field label="Market"><Input name="market" defaultValue={s(loc, "market")} /></Field>
+        <Field label="Type"><Select name="kind" defaultValue={s(loc, "kind") || "restaurant"}><option value="restaurant">Restaurant</option><option value="commissary">Commissary / central kitchen</option></Select></Field>
         <Field label="Region"><Select name="region_id" defaultValue={s(loc, "region_id")}><option value="">—</option>{regions.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</Select></Field>
         <Field label="District"><Select name="district_id" defaultValue={s(loc, "district_id")}><option value="">—</option>{districts.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</Select></Field>
         <label className="inline-flex items-center gap-2 self-end pb-2 text-sm"><input type="checkbox" name="active" defaultChecked={loc ? !!loc.active : true} /> Active</label>

@@ -5910,4 +5910,2163 @@ end $$;
 
 select app.apply_grants();
 
+-- ============================================================================
+-- 20260930002200_employee_identity.sql
+-- ============================================================================
+-- =====================================================================
+-- SHARED EMPLOYEE LOGIN: "Who are you?" + personal 4-digit PIN
+--
+-- A shared login (organization_members.shared_login) can sign in, but it
+-- cannot change anything until a person picks their name and enters their
+-- PIN. That creates an employee session; its random token travels with every
+-- request in the `x-employee-session` header. The token is only valid for
+-- the auth user that created it, so it identifies a person but grants nothing
+-- by itself. Every ledger row, audit entry, waste log and count entry
+-- records the employee.
+-- =====================================================================
+
+create extension if not exists pgcrypto with schema extensions;
+
+alter table public.organization_members add column if not exists shared_login boolean not null default false;
+
+create table public.employees (
+  id              uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  location_id     uuid references public.locations(id) on delete cascade,  -- null = every location
+  display_name    text not null check (length(btrim(display_name)) between 1 and 40),
+  active          boolean not null default true,
+  failed_attempts integer not null default 0,
+  locked_until    timestamptz,
+  created_by      uuid references public.profiles(id),
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+-- Names must be distinguishable on the "Who are you?" screen.
+create unique index employees_name_uniq on public.employees (organization_id, lower(btrim(display_name)));
+create trigger trg_employees_touch before update on public.employees for each row execute function app.touch_updated_at();
+
+-- PIN hashes live outside the API schema: a 4-digit PIN hash is trivially
+-- brute-forced, so no API role may ever read one.
+create table app.employee_pins (
+  employee_id uuid primary key references public.employees(id) on delete cascade,
+  pin_hash    text not null,
+  updated_at  timestamptz not null default now()
+);
+revoke all on app.employee_pins from public, authenticated, anon, service_role;
+
+create table public.employee_sessions (
+  token_hash      text primary key,          -- sha256 of the token; the token itself is never stored
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  employee_id     uuid not null references public.employees(id) on delete cascade,
+  user_id         uuid not null references public.profiles(id) on delete cascade,
+  device_id       text,
+  created_at      timestamptz not null default now(),
+  expires_at      timestamptz not null,
+  ended_at        timestamptz
+);
+create index on public.employee_sessions (employee_id);
+create index on public.employee_sessions (user_id, created_at desc);
+
+insert into app.write_protected_tables values ('employees'), ('employee_sessions');
+
+alter table public.employees enable row level security;
+alter table public.employee_sessions enable row level security;
+create policy employees_select on public.employees for select to authenticated
+  using (app.has_any_permission('users.manage', organization_id));
+create policy employee_sessions_select on public.employee_sessions for select to authenticated
+  using (app.has_any_permission('users.manage', organization_id));
+
+-- ---------------------------------------------------------------------
+-- Who is acting right now?
+-- ---------------------------------------------------------------------
+create or replace function app.employee_token_hash(p_token text) returns text
+language sql immutable as $$
+  select encode(sha256(convert_to(p_token, 'UTF8')), 'hex')
+$$;
+
+create or replace function app.current_employee_id() returns uuid
+language sql stable security definer set search_path = public as $$
+  select s.employee_id
+  from public.employee_sessions s
+  join public.employees e on e.id = s.employee_id and e.active
+  where s.token_hash = app.employee_token_hash(nullif(app.request_header('x-employee-session'), ''))
+    and s.user_id = auth.uid()
+    and s.ended_at is null
+    and s.expires_at > now()
+$$;
+
+create or replace function app.is_shared_login(p_org uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce((select shared_login from public.organization_members
+                   where organization_id = p_org and user_id = auth.uid() and active), false)
+$$;
+
+-- Shared logins must identify a person before any change is recorded.
+create or replace function app.require_actor(p_org uuid) returns void
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is not null and app.is_shared_login(p_org) and app.current_employee_id() is null then
+    raise exception 'Select your name and enter your PIN before making changes' using errcode = '42501';
+  end if;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Record the employee on every critical row
+-- ---------------------------------------------------------------------
+alter table public.audit_logs             add column if not exists employee_id uuid references public.employees(id);
+alter table public.inventory_transactions add column if not exists employee_id uuid references public.employees(id);
+alter table public.waste_logs             add column if not exists employee_id uuid references public.employees(id);
+alter table public.count_entries          add column if not exists employee_id uuid references public.employees(id);
+alter table public.count_entry_revisions  add column if not exists employee_id uuid references public.employees(id);
+alter table public.receipts               add column if not exists employee_id uuid references public.employees(id);
+alter table public.inventory_transfers    add column if not exists employee_id uuid references public.employees(id);
+
+alter table public.audit_logs             alter column employee_id set default app.current_employee_id();
+alter table public.inventory_transactions alter column employee_id set default app.current_employee_id();
+alter table public.waste_logs             alter column employee_id set default app.current_employee_id();
+alter table public.count_entry_revisions  alter column employee_id set default app.current_employee_id();
+alter table public.receipts               alter column employee_id set default app.current_employee_id();
+alter table public.inventory_transfers    alter column employee_id set default app.current_employee_id();
+create index on public.waste_logs (employee_id);
+
+-- Count entries are updated in place (revisions keep history): keep the
+-- current counter's employee on every write.
+create or replace function app.count_entries_employee() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' or new.counted_by is distinct from old.counted_by or new.counted_at is distinct from old.counted_at
+     or new.quantity is distinct from old.quantity then
+    new.employee_id := app.current_employee_id();
+  end if;
+  return new;
+end $$;
+create trigger trg_count_entries_employee before insert or update on public.count_entries
+  for each row execute function app.count_entries_employee();
+
+create or replace function app.count_entries_require_actor() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  perform app.require_actor(new.organization_id);
+  return new;
+end $$;
+create trigger trg_count_entries_actor before insert or update on public.count_entries
+  for each row execute function app.count_entries_require_actor();
+
+-- Audit: refuse unidentified shared logins; record the employee.
+create or replace function app.audit(
+  p_org uuid, p_location uuid, p_action text, p_entity_type text, p_entity_id text,
+  p_summary text, p_old jsonb default null, p_new jsonb default null
+) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform app.require_actor(p_org);
+  insert into public.audit_logs (organization_id, location_id, user_id, employee_id, action, entity_type, entity_id, summary,
+                                 old_value, new_value, device_id, user_agent, ip_address)
+  values (p_org, p_location, auth.uid(), app.current_employee_id(), p_action, p_entity_type, p_entity_id, p_summary, p_old, p_new,
+          app.request_header('x-device-id'), app.request_header('user-agent'),
+          split_part(coalesce(app.request_header('x-forwarded-for'), ''), ',', 1));
+end $$;
+
+-- Ledger: same rule. Every movement names a person.
+create or replace function app.post_inventory_txn(
+  p_location uuid, p_product uuid, p_type public.inv_txn_type, p_qty numeric, p_unit_cost numeric,
+  p_txn_at timestamptz, p_source_type text, p_source_id uuid, p_source_line_id uuid default null,
+  p_storage uuid default null, p_reason text default null, p_reference text default null,
+  p_notes text default null, p_lot uuid default null
+) returns bigint
+language plpgsql security definer set search_path = public as $$
+declare
+  v_id bigint;
+  v_org uuid := app.location_org(p_location);
+begin
+  if p_qty is null or p_qty = 0 then return null; end if;
+  if not exists (select 1 from public.products where id = p_product and organization_id = v_org) then
+    raise exception 'Product does not belong to this organization';
+  end if;
+  perform app.require_actor(v_org);
+  insert into public.inventory_transactions (organization_id, location_id, product_id, storage_location_id, txn_type,
+    quantity, unit_cost, txn_at, business_date, source_type, source_id, source_line_id, reason_code, reference, notes, lot_id, created_by, employee_id)
+  values (v_org, p_location, p_product, p_storage, p_type, round(p_qty, 4), round(greatest(coalesce(p_unit_cost, 0), 0), 6),
+    p_txn_at, app.business_date(p_location, p_txn_at), p_source_type, p_source_id, p_source_line_id, p_reason, p_reference, p_notes, p_lot,
+    auth.uid(), app.current_employee_id())
+  returning id into v_id;
+  return v_id;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- PIN rules
+-- ---------------------------------------------------------------------
+create or replace function app.check_pin(p_pin text) returns void
+language plpgsql immutable as $$
+begin
+  if p_pin is null or p_pin !~ '^[0-9]{4}$' then
+    raise exception 'The PIN must be exactly 4 digits' using errcode = '22023';
+  end if;
+  if p_pin ~ '^(.)\1{3}$' or p_pin in ('0123', '1234', '2345', '3456', '4567', '5678', '6789', '9876', '8765', '7654', '6543', '5432', '4321', '3210') then
+    raise exception 'That PIN is too easy to guess. Avoid repeated or sequential digits.' using errcode = '22023';
+  end if;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- The "Who are you?" screen
+-- ---------------------------------------------------------------------
+create or replace function public.list_pin_employees(p_location uuid)
+returns table (id uuid, display_name text, locked boolean)
+language sql stable security definer set search_path = public as $$
+  select e.id, e.display_name, coalesce(e.locked_until > now(), false)
+  from public.employees e
+  where e.active
+    and e.organization_id = app.location_org(p_location)
+    and (e.location_id is null or e.location_id = p_location)
+    and p_location in (select app.user_location_ids())
+  order by lower(e.display_name)
+$$;
+
+-- Verifies the PIN and starts an employee session. Returns (never raises on a
+-- wrong PIN) so the failed-attempt counter is committed.
+create or replace function public.start_employee_session(p_employee uuid, p_pin text)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  v_uid uuid := auth.uid();
+  v_e public.employees;
+  v_token text;
+  v_expires timestamptz := now() + interval '12 hours';
+  v_recent integer;
+  v_hash text;
+begin
+  if v_uid is null then raise exception 'Not signed in' using errcode = '42501'; end if;
+  select * into v_e from public.employees where id = p_employee for update;
+  if v_e.id is null or not v_e.active
+     or not exists (select 1 from public.organization_members where organization_id = v_e.organization_id and user_id = v_uid and active) then
+    return jsonb_build_object('ok', false, 'error', 'Employee not found');
+  end if;
+  -- Device-level throttle: too many wrong PINs from this login in 10 minutes.
+  select count(*) into v_recent from public.audit_logs
+   where user_id = v_uid and action = 'pin_failed' and created_at > now() - interval '10 minutes';
+  if v_recent >= 15 then
+    return jsonb_build_object('ok', false, 'error', 'Too many wrong PINs. Wait 10 minutes or ask a manager.');
+  end if;
+  if v_e.locked_until is not null and v_e.locked_until > now() then
+    return jsonb_build_object('ok', false, 'locked', true,
+      'error', format('Locked after too many wrong PINs. Try again in %s minute(s) or ask a manager.',
+                      ceil(extract(epoch from v_e.locked_until - now()) / 60)::int));
+  end if;
+  select pin_hash into v_hash from app.employee_pins where employee_id = v_e.id;
+  if p_pin is null or v_hash is null or v_hash <> extensions.crypt(p_pin, v_hash) then
+    update public.employees
+       set failed_attempts = failed_attempts + 1,
+           locked_until = case when failed_attempts + 1 >= 5 then now() + interval '5 minutes' end
+     where id = v_e.id;
+    insert into public.audit_logs (organization_id, user_id, employee_id, action, entity_type, entity_id, summary, device_id, user_agent, ip_address)
+    values (v_e.organization_id, v_uid, v_e.id, 'pin_failed', 'employee', v_e.id::text, 'Wrong PIN for ' || v_e.display_name,
+            app.request_header('x-device-id'), app.request_header('user-agent'), split_part(coalesce(app.request_header('x-forwarded-for'), ''), ',', 1));
+    return jsonb_build_object('ok', false, 'error', 'Incorrect PIN',
+      'attempts_left', greatest(5 - (v_e.failed_attempts + 1), 0));
+  end if;
+
+  update public.employees set failed_attempts = 0, locked_until = null where id = v_e.id;
+  -- One active session per person per login: signing in again ends the previous one.
+  update public.employee_sessions set ended_at = now()
+   where user_id = v_uid and employee_id = v_e.id and ended_at is null;
+  v_token := encode(extensions.gen_random_bytes(32), 'hex');
+  insert into public.employee_sessions (token_hash, organization_id, employee_id, user_id, device_id, expires_at)
+  values (app.employee_token_hash(v_token), v_e.organization_id, v_e.id, v_uid, app.request_header('x-device-id'), v_expires);
+  insert into public.audit_logs (organization_id, user_id, employee_id, action, entity_type, entity_id, summary, device_id, user_agent, ip_address)
+  values (v_e.organization_id, v_uid, v_e.id, 'identify', 'employee', v_e.id::text, v_e.display_name || ' started a shift session',
+          app.request_header('x-device-id'), app.request_header('user-agent'), split_part(coalesce(app.request_header('x-forwarded-for'), ''), ',', 1));
+  return jsonb_build_object('ok', true, 'token', v_token, 'employee_id', v_e.id, 'display_name', v_e.display_name, 'expires_at', v_expires);
+end $$;
+
+create or replace function public.end_employee_session() returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  update public.employee_sessions set ended_at = now()
+   where token_hash = app.employee_token_hash(nullif(app.request_header('x-employee-session'), ''))
+     and user_id = auth.uid() and ended_at is null;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Managing employees and shared logins
+-- ---------------------------------------------------------------------
+create or replace function app.require_employee_admin(p_org uuid, p_location uuid) returns void
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if p_location is null then
+    perform app.require_org_permission('users.manage', p_org);
+  else
+    if app.location_org(p_location) is distinct from p_org then raise exception 'Location not in organization'; end if;
+    perform app.require_permission('users.manage', p_location);
+  end if;
+end $$;
+
+-- Creates (p_id null) or updates an employee. p_pin null keeps the current PIN.
+create or replace function public.save_employee(p_org uuid, p_id uuid, p_name text, p_location uuid, p_pin text, p_active boolean default true)
+returns uuid
+language plpgsql security definer set search_path = public as $$
+declare v_old public.employees; v_id uuid; v_name text := btrim(coalesce(p_name, ''));
+begin
+  if v_name = '' then raise exception 'Name is required'; end if;
+  if p_id is null then
+    perform app.require_employee_admin(p_org, p_location);
+    perform app.check_pin(p_pin);
+    insert into public.employees (organization_id, location_id, display_name, active, created_by)
+    values (p_org, p_location, v_name, coalesce(p_active, true), auth.uid())
+    returning id into v_id;
+    insert into app.employee_pins (employee_id, pin_hash) values (v_id, extensions.crypt(p_pin, extensions.gen_salt('bf', 8)));
+    perform app.audit(p_org, p_location, 'create', 'employee', v_id::text, 'Added employee ' || v_name, null,
+                      jsonb_build_object('name', v_name, 'location_id', p_location));
+    return v_id;
+  end if;
+  select * into v_old from public.employees where id = p_id and organization_id = p_org for update;
+  if v_old.id is null then raise exception 'Employee not found'; end if;
+  perform app.require_employee_admin(p_org, v_old.location_id);
+  perform app.require_employee_admin(p_org, p_location);
+  if p_pin is not null and p_pin <> '' then perform app.check_pin(p_pin); end if;
+  update public.employees set
+    display_name = v_name, location_id = p_location, active = coalesce(p_active, active),
+    failed_attempts = case when coalesce(p_pin, '') <> '' then 0 else failed_attempts end,
+    locked_until = case when coalesce(p_pin, '') <> '' then null else locked_until end
+  where id = p_id;
+  if coalesce(p_pin, '') <> '' then
+    update app.employee_pins set pin_hash = extensions.crypt(p_pin, extensions.gen_salt('bf', 8)), updated_at = now() where employee_id = p_id;
+    -- a new PIN ends sessions started with the old one
+    update public.employee_sessions set ended_at = now() where employee_id = p_id and ended_at is null;
+  end if;
+  if not coalesce(p_active, true) then
+    update public.employee_sessions set ended_at = now() where employee_id = p_id and ended_at is null;
+  end if;
+  perform app.audit(p_org, p_location, 'update', 'employee', p_id::text, 'Updated employee ' || v_name,
+    jsonb_build_object('name', v_old.display_name, 'location_id', v_old.location_id, 'active', v_old.active),
+    jsonb_build_object('name', v_name, 'location_id', p_location, 'active', coalesce(p_active, v_old.active),
+                       'pin_changed', coalesce(p_pin, '') <> ''));
+  return p_id;
+end $$;
+
+create or replace function public.unlock_employee(p_employee uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_e public.employees;
+begin
+  select * into v_e from public.employees where id = p_employee;
+  if v_e.id is null then raise exception 'Employee not found'; end if;
+  perform app.require_employee_admin(v_e.organization_id, v_e.location_id);
+  update public.employees set failed_attempts = 0, locked_until = null where id = p_employee;
+  perform app.audit(v_e.organization_id, v_e.location_id, 'unlock', 'employee', p_employee::text, 'Unlocked PIN for ' || v_e.display_name, null, null);
+end $$;
+
+create or replace function public.list_employees(p_org uuid)
+returns table (id uuid, display_name text, location_id uuid, location_name text, active boolean, locked boolean,
+               last_seen timestamptz, actions_30d bigint)
+language sql stable security definer set search_path = public as $$
+  select e.id, e.display_name, e.location_id, l.code || ' ' || l.name, e.active, coalesce(e.locked_until > now(), false),
+         (select max(s.created_at) from public.employee_sessions s where s.employee_id = e.id),
+         (select count(*) from public.audit_logs a where a.employee_id = e.id and a.created_at > now() - interval '30 days'
+            and a.action not in ('identify', 'pin_failed'))
+  from public.employees e left join public.locations l on l.id = e.location_id
+  where e.organization_id = p_org and app.has_any_permission('users.manage', p_org)
+  order by e.active desc, lower(e.display_name)
+$$;
+
+create or replace function public.set_shared_login(p_org uuid, p_user uuid, p_shared boolean) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform app.require_org_permission('users.manage', p_org);
+  if p_user = auth.uid() and p_shared then raise exception 'You cannot make your own login shared'; end if;
+  if p_shared and exists (select 1 from public.user_roles ur join public.roles r on r.id = ur.role_id
+                          where ur.user_id = p_user and ur.organization_id = p_org and r.rank > 10) then
+    raise exception 'Only Employee or Read Only logins can be shared. Managers and owners need their own login.';
+  end if;
+  update public.organization_members set shared_login = p_shared where organization_id = p_org and user_id = p_user;
+  if not found then raise exception 'User not found'; end if;
+  perform app.audit(p_org, null, 'update', 'user', p_user::text,
+    case when p_shared then 'Login set to shared (requires name + PIN)' else 'Login set to personal' end,
+    jsonb_build_object('shared_login', not p_shared), jsonb_build_object('shared_login', p_shared));
+end $$;
+
+-- A shared login cannot be granted manager roles (would bypass accountability).
+create or replace function app.user_roles_shared_guard() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if exists (select 1 from public.organization_members where organization_id = new.organization_id and user_id = new.user_id and shared_login)
+     and (select rank from public.roles where id = new.role_id) > 10 then
+    raise exception 'A shared login can only hold the Employee or Read Only role' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+create trigger trg_user_roles_shared_guard before insert or update on public.user_roles
+  for each row execute function app.user_roles_shared_guard();
+
+-- Directory now shows which logins are shared.
+drop function if exists public.list_org_users(uuid);
+create or replace function public.list_org_users(p_org uuid)
+returns table (user_id uuid, email text, full_name text, active boolean, employee_number text, roles jsonb, shared_login boolean)
+language sql stable security definer set search_path = public as $$
+  select m.user_id, p.email, p.full_name, m.active, m.employee_number,
+         coalesce((select jsonb_agg(jsonb_build_object('id', ur.id, 'role', r.key, 'name', r.name, 'rank', r.rank, 'scope_type', ur.scope_type, 'scope_id', ur.scope_id,
+                                                      'scope_name', case ur.scope_type when 'organization' then 'All locations'
+                                                                     when 'location' then (select code || ' ' || name from public.locations where id = ur.scope_id)
+                                                                     when 'district' then (select name from public.districts where id = ur.scope_id)
+                                                                     when 'region' then (select name from public.regions where id = ur.scope_id) end)
+                                   order by r.rank desc)
+                   from public.user_roles ur join public.roles r on r.id = ur.role_id
+                   where ur.user_id = m.user_id and ur.organization_id = p_org), '[]'::jsonb),
+         m.shared_login
+  from public.organization_members m join public.profiles p on p.id = m.user_id
+  where m.organization_id = p_org and app.has_any_permission('users.manage', p_org)
+  order by m.active desc, p.full_name
+$$;
+
+-- Session context: adds shared_login and the identified employee.
+create or replace function public.get_session_context() returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then return null; end if;
+  return jsonb_build_object(
+    'user', (select to_jsonb(p) from public.profiles p where p.id = v_uid),
+    'organizations', coalesce((select jsonb_agg(jsonb_build_object('id', o.id, 'name', o.name, 'currency', o.currency, 'settings', o.settings,
+                                                                   'shared_login', m.shared_login) order by o.name)
+                        from public.organizations o
+                        join public.organization_members m on m.organization_id = o.id and m.user_id = v_uid and m.active), '[]'::jsonb),
+    'locations', coalesce((select jsonb_agg(jsonb_build_object(
+                        'id', l.id, 'organization_id', l.organization_id, 'code', l.code, 'name', l.name,
+                        'timezone', l.timezone, 'region_id', l.region_id, 'district_id', l.district_id, 'market', l.market,
+                        'permissions', (select coalesce(jsonb_agg(distinct rp.permission_key), '[]'::jsonb)
+                                        from public.user_roles ur
+                                        join public.role_permissions rp on rp.role_id = ur.role_id
+                                        join public.permissions pm on pm.key = rp.permission_key
+                                        where ur.user_id = v_uid and ur.organization_id = l.organization_id
+                                          and (ur.scope_type = 'organization'
+                                               or (not pm.org_scope_only and (
+                                                     (ur.scope_type = 'region' and ur.scope_id = l.region_id)
+                                                  or (ur.scope_type = 'district' and ur.scope_id = l.district_id)
+                                                  or (ur.scope_type = 'location' and ur.scope_id = l.id))))))
+                        order by l.code)
+                      from public.locations l where l.id in (select app.user_location_ids()) and l.active), '[]'::jsonb),
+    'org_permissions', coalesce((select jsonb_agg(distinct jsonb_build_object('organization_id', ur.organization_id, 'permission', rp.permission_key))
+                        from public.user_roles ur join public.role_permissions rp on rp.role_id = ur.role_id
+                        join public.organization_members m on m.organization_id = ur.organization_id and m.user_id = ur.user_id and m.active
+                        where ur.user_id = v_uid and ur.scope_type = 'organization'), '[]'::jsonb),
+    'roles', coalesce((select jsonb_agg(jsonb_build_object('role', r.key, 'name', r.name, 'scope_type', ur.scope_type, 'scope_id', ur.scope_id))
+                        from public.user_roles ur join public.roles r on r.id = ur.role_id where ur.user_id = v_uid), '[]'::jsonb),
+    'employee', (select jsonb_build_object('id', e.id, 'display_name', e.display_name)
+                 from public.employees e where e.id = app.current_employee_id())
+  );
+end $$;
+
+-- Audit viewer helper: employee names for a page of audit rows.
+create or replace function public.employee_names(p_ids uuid[])
+returns table (id uuid, display_name text)
+language sql stable security definer set search_path = public as $$
+  select e.id, e.display_name from public.employees e
+  where e.id = any(p_ids) and e.organization_id in (select app.user_org_ids())
+$$;
+
+-- Employees transfer product between storage areas (spec: TRANSFER PRODUCT).
+insert into public.role_permissions (role_id, permission_key)
+select id, 'inventory.transfer' from public.roles where organization_id is null and key = 'employee'
+on conflict do nothing;
+
+select app.apply_grants();
+
+-- ============================================================================
+-- 20260930002300_report_permissions.sql
+-- ============================================================================
+-- =====================================================================
+-- FINANCIAL DATA IS PERMISSION-CHECKED IN THE DATABASE
+--
+-- Report functions used to check only that the caller belonged to the
+-- location, so any employee could call them through the API and read sales,
+-- food cost and vendor spending. They are now private (callable only from
+-- other database functions, which run as their owner) and the app calls
+-- gated get_* wrappers:
+--   reports.view_cost  sales, food cost, purchases, vendor spending, recipe cost
+--   reports.view       operational reports without dollars
+-- =====================================================================
+
+-- Functions listed here never get EXECUTE for API roles (apply_grants honours it).
+create table if not exists app.private_functions (signature text primary key);
+
+create or replace function app.apply_grants() returns void
+language plpgsql as $$
+declare t text;
+begin
+  execute 'grant select, insert, update, delete on all tables in schema public to authenticated, service_role';
+  execute 'grant usage, select on all sequences in schema public to authenticated, service_role';
+  execute 'grant execute on all functions in schema public to authenticated, service_role';
+  execute 'revoke execute on all functions in schema public from anon, public';
+  execute 'grant execute on all functions in schema app to authenticated, service_role';
+  for t in select table_name from app.write_protected_tables loop
+    execute format('revoke insert, update, delete on public.%I from authenticated', t);
+  end loop;
+  for t in select signature from app.private_functions loop
+    if to_regprocedure(t) is not null then
+      execute format('revoke execute on function %s from authenticated, anon, public', t);
+    end if;
+  end loop;
+end $$;
+
+insert into app.private_functions values
+  ('public.dashboard_kpis(uuid)'),
+  ('public.food_cost_summary(uuid,timestamptz,timestamptz,text[])'),
+  ('public.avt_by_product(uuid,timestamptz,timestamptz)'),
+  ('public.location_scorecard(uuid,integer)'),
+  ('public.report_inventory_efficiency(uuid,integer)'),
+  ('public.report_purchases(uuid,date,date)'),
+  ('public.report_vendor_performance(uuid,date,date)'),
+  ('public.report_order_accuracy(uuid,date,date)'),
+  ('public.recipe_costs(uuid)'),
+  ('public.recipe_cost_breakdown(uuid,uuid)'),
+  ('public.recipe_unit_cost(uuid,uuid)'),
+  ('public.forecast_sales(uuid,date,integer)')
+on conflict do nothing;
+
+create or replace function app.require_report_access(p_perm text, p_location uuid) returns void
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if app.is_system_caller() then return; end if;
+  perform app.require_permission(p_perm, p_location);
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Dashboard: everyone with location access gets operational counts;
+-- dollars only with reports.view_cost.
+-- ---------------------------------------------------------------------
+create or replace function public.get_dashboard(p_location uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare v jsonb;
+begin
+  if not (p_location in (select app.user_location_ids())) then raise exception 'Location not found' using errcode = '42501'; end if;
+  v := public.dashboard_kpis(p_location);
+  if app.has_permission('reports.view_cost', p_location) then return v; end if;
+  v := v - array['inventory_value', 'food_cost', 'food_cost_period', 'turns_28d', 'waste_today', 'waste_week', 'waste_7d',
+                 'sales_7d', 'sales_today', 'sales_yesterday', 'forecast_today', 'forecast_week', 'top_waste', 'price_increases'];
+  -- variance quantities stay, dollars go
+  if v ? 'last_count' and v -> 'last_count' <> 'null'::jsonb then
+    v := jsonb_set(v, '{last_count}', (v -> 'last_count') - array['variance_value', 'loss_value']);
+  end if;
+  if v ? 'largest_variances' and jsonb_typeof(v -> 'largest_variances') = 'array' then
+    v := jsonb_set(v, '{largest_variances}', coalesce((select jsonb_agg(x - 'value') from jsonb_array_elements(v -> 'largest_variances') x), '[]'::jsonb));
+  end if;
+  return v || jsonb_build_object('cost_hidden', true);
+end $$;
+
+create or replace function public.get_food_cost(p_location uuid, p_from timestamptz, p_to timestamptz, p_cost_groups text[] default array['food'])
+returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+begin
+  perform app.require_report_access('reports.view_cost', p_location);
+  return public.food_cost_summary(p_location, p_from, p_to, p_cost_groups);
+end $$;
+
+create or replace function public.get_avt_by_product(p_location uuid, p_from timestamptz, p_to timestamptz)
+returns table (product_id uuid, product_name text, category_name text, cost_group text, inventory_unit text, begin_qty numeric, received_qty numeric,
+               transfer_qty numeric, produced_qty numeric, theoretical_qty numeric, waste_qty numeric, adjusted_qty numeric, expected_end_qty numeric,
+               physical_end_qty numeric, variance_qty numeric, unit_cost numeric, variance_value numeric, theoretical_value numeric, counted boolean)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  perform app.require_report_access('reports.view_cost', p_location);
+  return query select * from public.avt_by_product(p_location, p_from, p_to);
+end $$;
+
+create or replace function public.get_location_scorecard(p_org uuid, p_days integer default 28)
+returns table (location_id uuid, code text, name text, region text, district text, market text,
+               net_sales numeric, actual_cost numeric, theoretical_cost numeric, actual_pct numeric, theoretical_pct numeric,
+               variance_pts numeric, waste numeric, waste_pct numeric, count_variance numeric, inventory_value numeric, open_alerts bigint)
+language sql stable security definer set search_path = public as $$
+  select s.* from public.location_scorecard(p_org, p_days) s
+  where app.has_permission('reports.view_cost', s.location_id) and app.has_permission('reports.view_corporate', s.location_id)
+$$;
+
+create or replace function public.get_report_inventory_efficiency(p_location uuid, p_days integer default 28)
+returns table (product_id uuid, product_name text, category_name text, inventory_unit text, on_hand numeric, value numeric,
+               usage_qty numeric, usage_value numeric, avg_daily_usage numeric, days_on_hand numeric, turns_annualized numeric,
+               last_receipt_at timestamptz, days_since_receipt integer, last_counted_at timestamptz, shelf_life_days integer, aging_flag text)
+language plpgsql stable security definer set search_path = public as $$
+declare v_cost boolean;
+begin
+  perform app.require_report_access('reports.view', p_location);
+  v_cost := app.is_system_caller() or app.has_permission('reports.view_cost', p_location);
+  return query select r.product_id, r.product_name, r.category_name, r.inventory_unit, r.on_hand,
+                      case when v_cost then r.value end, r.usage_qty, case when v_cost then r.usage_value end,
+                      r.avg_daily_usage, r.days_on_hand, r.turns_annualized, r.last_receipt_at, r.days_since_receipt,
+                      r.last_counted_at, r.shelf_life_days, r.aging_flag
+               from public.report_inventory_efficiency(p_location, p_days) r;
+end $$;
+
+create or replace function public.get_report_purchases(p_location uuid, p_from date, p_to date)
+returns table (receipt_id uuid, receipt_number text, invoice_number text, delivery_date date, vendor_name text, product_id uuid, product_name text,
+               category_name text, unit_code text, ordered_qty numeric, received_qty numeric, invoiced_qty numeric, contract_price numeric,
+               invoice_price numeric, price_variance numeric, extended numeric, exceptions text)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  perform app.require_report_access('reports.view_cost', p_location);
+  return query select * from public.report_purchases(p_location, p_from, p_to);
+end $$;
+
+create or replace function public.get_report_vendor_performance(p_location uuid, p_from date, p_to date)
+returns table (vendor_name text, receipts bigint, lines bigint, short_lines bigint, over_lines bigint, back_orders bigint, substitutions bigint,
+               price_variance_lines bigint, rejected_lines bigint, temp_failures bigint, fill_rate_pct numeric, late_deliveries bigint,
+               invoice_over_short numeric, purchases numeric)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  perform app.require_report_access('reports.view_cost', p_location);
+  return query select * from public.report_vendor_performance(p_location, p_from, p_to);
+end $$;
+
+create or replace function public.get_report_order_accuracy(p_location uuid, p_from date, p_to date)
+returns table (po_id uuid, po_number text, vendor_name text, delivery_date date, product_name text, unit_code text,
+               suggested_qty numeric, ordered_qty numeric, difference numeric, difference_value numeric)
+language plpgsql stable security definer set search_path = public as $$
+declare v_cost boolean;
+begin
+  perform app.require_report_access('reports.view', p_location);
+  v_cost := app.is_system_caller() or app.has_permission('reports.view_cost', p_location);
+  return query select r.po_id, r.po_number, r.vendor_name, r.delivery_date, r.product_name, r.unit_code, r.suggested_qty, r.ordered_qty,
+                      r.difference, case when v_cost then r.difference_value end
+               from public.report_order_accuracy(p_location, p_from, p_to) r;
+end $$;
+
+-- Recipe cost is "detailed food cost": hidden (null) without reports.view_cost,
+-- but the recipe itself stays readable for cooks.
+create or replace function public.get_recipe_costs(p_location uuid)
+returns table (recipe_id uuid, unit_cost numeric)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not (p_location in (select app.user_location_ids())) then raise exception 'Location not found' using errcode = '42501'; end if;
+  if not app.has_permission('reports.view_cost', p_location) then return; end if;
+  return query select * from public.recipe_costs(p_location);
+end $$;
+
+create or replace function public.get_recipe_unit_cost(p_recipe uuid, p_location uuid) returns numeric
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not (p_location in (select app.user_location_ids())) then raise exception 'Location not found' using errcode = '42501'; end if;
+  if not app.has_permission('reports.view_cost', p_location) then return null; end if;
+  return public.recipe_unit_cost(p_recipe, p_location);
+end $$;
+
+create or replace function public.get_recipe_cost_breakdown(p_recipe uuid, p_location uuid)
+returns table (ingredient_id uuid, kind text, name text, quantity numeric, unit_code text, yield_pct numeric, cost numeric)
+language plpgsql stable security definer set search_path = public as $$
+declare v_cost boolean;
+begin
+  if not (p_location in (select app.user_location_ids())) then raise exception 'Location not found' using errcode = '42501'; end if;
+  v_cost := app.has_permission('reports.view_cost', p_location);
+  return query select b.ingredient_id, b.kind, b.name, b.quantity, b.unit_code, b.yield_pct, case when v_cost then b.cost end
+               from public.recipe_cost_breakdown(p_recipe, p_location) b;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Sales are management information.
+-- ---------------------------------------------------------------------
+drop policy if exists sales_select on public.sales_imports;
+create policy sales_select on public.sales_imports for select to authenticated
+  using (location_id in (select app.user_location_ids())
+         and (app.has_permission('sales.import', location_id) or app.has_permission('reports.view_cost', location_id)));
+
+select app.apply_grants();
+
+-- ============================================================================
+-- 20260930002400_ordering_center.sql
+-- ============================================================================
+-- =====================================================================
+-- ORDERING CENTER: what to order from each vendor, when it must be
+-- ordered, and a link to the vendor's own ordering website. Orders are
+-- placed on the vendor's site (no vendor API/EDI needed); "Mark as ordered"
+-- records a submitted purchase order so the quantity counts as incoming and
+-- the delivery can be checked against it.
+-- =====================================================================
+
+-- Distributors (Sysco, Greco), the internal commissary, or anything else.
+alter table public.vendors add column if not exists kind text not null default 'distributor'
+  check (kind in ('distributor', 'commissary', 'other'));
+
+-- Ordering links open in a new tab: only http(s) URLs (never javascript:, data:, …).
+update public.vendors set order_website = null where order_website is not null and order_website !~* '^https?://[^\s]+$';
+alter table public.vendors add constraint vendors_order_website_http check (order_website is null or order_website ~* '^https?://[^\s]+$');
+
+-- Next delivery that can still be ordered, the order-by deadline and the one after.
+-- A delivery on day D can be ordered until (D - lead time) at the cutoff time
+-- (end of that day when no cutoff is set), in the store's time zone.
+create or replace function app.vendor_order_window(p_location uuid, p_vendor uuid)
+returns table (delivery_date date, order_by timestamptz, next_delivery_date date)
+language plpgsql stable security definer set search_path = public as $$
+declare
+  s public.location_vendor_settings;
+  v_tz text;
+  v_now timestamp;
+  d date;
+  v_deadline timestamp;
+begin
+  select * into s from public.location_vendor_settings where location_id = p_location and vendor_id = p_vendor;
+  select timezone into v_tz from public.locations where id = p_location;
+  v_now := now() at time zone v_tz;
+  for i in 0..21 loop
+    d := v_now::date + i;
+    continue when coalesce(array_length(s.delivery_days, 1), 0) > 0 and not (extract(dow from d)::smallint = any(s.delivery_days));
+    v_deadline := (d - coalesce(s.lead_time_days, 1))::timestamp + coalesce(s.order_cutoff, time '23:59');
+    if v_deadline > v_now then
+      delivery_date := d;
+      order_by := v_deadline at time zone v_tz;
+      next_delivery_date := app.next_vendor_delivery(p_location, p_vendor, d);
+      return next;
+      return;
+    end if;
+  end loop;
+end $$;
+
+create or replace function public.vendor_order_schedule(p_location uuid)
+returns table (vendor_id uuid, vendor_name text, kind text, order_website text, account_number text, minimum_order numeric,
+               delivery_days smallint[], order_cutoff time, lead_time_days integer,
+               delivery_date date, order_by timestamptz, next_delivery_date date,
+               ordered_po_id uuid, ordered_po_number text, ordered_at timestamptz)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  perform app.require_permission('orders.view', p_location);
+  return query
+  select s.vendor_id, s.vendor_name, v.kind, v.order_website, s.account_number, s.minimum_order,
+         s.delivery_days, s.order_cutoff, s.lead_time_days,
+         w.delivery_date, w.order_by, w.next_delivery_date,
+         po.id, po.po_number, po.submitted_at
+  from public.location_vendor_settings s
+  join public.vendors v on v.id = s.vendor_id
+  left join lateral app.vendor_order_window(p_location, s.vendor_id) w on true
+  left join lateral (
+    select p.id, p.po_number, p.submitted_at from public.purchase_orders p
+    where p.location_id = p_location and p.vendor_id = s.vendor_id and p.expected_delivery_date = w.delivery_date
+      and p.status not in ('draft', 'ready_to_submit', 'cancelled')
+    order by p.submitted_at desc nulls last limit 1) po on true
+  where s.location_id = p_location and s.active
+  order by case v.kind when 'distributor' then 0 when 'commissary' then 1 else 2 end, s.vendor_name;
+end $$;
+
+select app.apply_grants();
+
+-- ============================================================================
+-- 20260930002500_commissary.sql
+-- ============================================================================
+-- =====================================================================
+-- COMMISSARY / CENTRAL KITCHEN: an internal supplier inside the system.
+--
+-- The commissary is a location (kind = 'commissary') that produces items
+-- (record_production) and supplies restaurants through a vendor record of
+-- kind 'commissary'. A restaurant's commissary order moves:
+--   DRAFT -> SUBMITTED -> ACCEPTED -> PREPARING -> READY -> IN TRANSIT -> RECEIVED
+--   (or CANCELLED before it ships)
+-- Shipping posts TRANSFER_OUT at the commissary; receiving posts TRANSFER_IN at
+-- the restaurant for what actually arrived. Commissary out always equals
+-- restaurant in: anything shipped but not received is credited back to the
+-- commissary (CORRECTION) and flagged as a discrepancy.
+-- =====================================================================
+
+alter table public.locations add column if not exists kind text not null default 'restaurant' check (kind in ('restaurant', 'commissary'));
+alter table public.vendors add column if not exists supplying_location_id uuid references public.locations(id);
+alter table public.vendors add constraint vendors_commissary_location check (kind <> 'commissary' or supplying_location_id is not null);
+
+create type public.commissary_order_status as enum ('draft', 'submitted', 'accepted', 'preparing', 'ready', 'in_transit', 'received', 'cancelled');
+
+create table public.commissary_orders (
+  id                     uuid primary key default gen_random_uuid(),
+  organization_id        uuid not null references public.organizations(id),
+  order_number           text not null,
+  location_id            uuid not null references public.locations(id),      -- ordering restaurant
+  vendor_id              uuid not null references public.vendors(id),        -- the commissary vendor record
+  commissary_location_id uuid not null references public.locations(id),
+  status                 public.commissary_order_status not null default 'draft',
+  needed_date            date not null,
+  notes                  text,
+  client_key             uuid unique,
+  created_by             uuid references public.profiles(id),
+  submitted_by           uuid references public.profiles(id),
+  submitted_at           timestamptz,
+  accepted_at            timestamptz,
+  preparing_at           timestamptz,
+  ready_at               timestamptz,
+  shipped_by             uuid references public.profiles(id),
+  shipped_at             timestamptz,
+  received_by            uuid references public.profiles(id),
+  received_at            timestamptz,
+  cancelled_by           uuid references public.profiles(id),
+  cancelled_at           timestamptz,
+  cancel_reason          text,
+  discrepancy_value      numeric(14,2),
+  employee_id            uuid references public.employees(id) default app.current_employee_id(),
+  created_at             timestamptz not null default now(),
+  updated_at             timestamptz not null default now(),
+  unique (organization_id, order_number),
+  check (location_id <> commissary_location_id)
+);
+create index on public.commissary_orders (location_id, status, needed_date);
+create index on public.commissary_orders (commissary_location_id, status, needed_date);
+create trigger trg_commissary_orders_touch before update on public.commissary_orders for each row execute function app.touch_updated_at();
+
+create table public.commissary_order_items (
+  id            uuid primary key default gen_random_uuid(),
+  order_id      uuid not null references public.commissary_orders(id) on delete cascade,
+  product_id    uuid not null references public.products(id),
+  unit_id       uuid not null references public.units(id),
+  unit_factor   numeric(24,10) not null check (unit_factor > 0),
+  qty_ordered   numeric(12,4) not null check (qty_ordered > 0),
+  qty_shipped   numeric(12,4) check (qty_shipped is null or qty_shipped >= 0),
+  qty_received  numeric(12,4) check (qty_received is null or qty_received >= 0),
+  unit_cost     numeric(18,6),                        -- per inventory unit at the commissary when shipped
+  notes         text,
+  sort          integer not null default 0,
+  unique (order_id, product_id, unit_id)
+);
+create index on public.commissary_order_items (order_id);
+
+insert into app.write_protected_tables values ('commissary_orders'), ('commissary_order_items');
+alter table public.commissary_orders enable row level security;
+alter table public.commissary_order_items enable row level security;
+create policy commissary_orders_select on public.commissary_orders for select to authenticated
+  using (location_id in (select app.user_location_ids()) or commissary_location_id in (select app.user_location_ids()));
+create policy commissary_items_select on public.commissary_order_items for select to authenticated
+  using (order_id in (select id from public.commissary_orders));
+
+-- Dollar values on commissary orders follow the same rule as everywhere else.
+create or replace function public.commissary_order_lines(p_order uuid)
+returns table (id uuid, product_id uuid, product_name text, product_number text, unit_id uuid, unit_code text, unit_factor numeric,
+               inventory_unit text, qty_ordered numeric, qty_shipped numeric, qty_received numeric, unit_cost numeric, notes text)
+language sql stable security definer set search_path = public as $$
+  select i.id, i.product_id, p.name, p.product_number, i.unit_id, u.code, i.unit_factor, iu.code, i.qty_ordered, i.qty_shipped, i.qty_received,
+         case when app.has_permission('reports.view_cost', o.location_id) or app.has_permission('reports.view_cost', o.commissary_location_id) then i.unit_cost end,
+         i.notes
+  from public.commissary_order_items i
+  join public.commissary_orders o on o.id = i.order_id
+  join public.products p on p.id = i.product_id
+  join public.units u on u.id = i.unit_id
+  join public.units iu on iu.id = p.inventory_unit_id
+  where i.order_id = p_order
+    and (o.location_id in (select app.user_location_ids()) or o.commissary_location_id in (select app.user_location_ids()))
+  order by i.sort, p.name
+$$;
+
+-- Orders with both location names: a restaurant cannot read the commissary's
+-- location row (and vice versa), but both parties need to see who is who.
+create or replace function public.list_commissary_orders(p_location uuid)
+returns table (id uuid, order_number text, status public.commissary_order_status, needed_date date, location_id uuid, commissary_location_id uuid,
+               discrepancy_value numeric, restaurant_code text, restaurant_name text, commissary_code text, commissary_name text)
+language sql stable security definer set search_path = public as $$
+  select o.id, o.order_number, o.status, o.needed_date, o.location_id, o.commissary_location_id, o.discrepancy_value,
+         r.code, r.name, c.code, c.name
+  from public.commissary_orders o join public.locations r on r.id = o.location_id join public.locations c on c.id = o.commissary_location_id
+  where p_location in (select app.user_location_ids()) and (o.location_id = p_location or o.commissary_location_id = p_location)
+  order by o.needed_date desc, o.order_number desc
+  limit 300
+$$;
+
+create or replace function public.get_commissary_order(p_order uuid) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select to_jsonb(o) || jsonb_build_object(
+           'restaurant', jsonb_build_object('code', r.code, 'name', r.name, 'timezone', r.timezone),
+           'commissary', jsonb_build_object('code', c.code, 'name', c.name))
+  from public.commissary_orders o join public.locations r on r.id = o.location_id join public.locations c on c.id = o.commissary_location_id
+  where o.id = p_order and (o.location_id in (select app.user_location_ids()) or o.commissary_location_id in (select app.user_location_ids()))
+$$;
+
+-- ---------------------------------------------------------------------
+-- Create / edit (draft only)
+-- p_lines: [{product_id, unit_id, qty, notes}]
+-- ---------------------------------------------------------------------
+create or replace function public.save_commissary_order(p_id uuid, p_location uuid, p_vendor uuid, p_needed date, p_notes text, p_lines jsonb,
+                                                        p_client_key uuid default null)
+returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  v_org uuid := app.location_org(p_location); v_v public.vendors; v_o public.commissary_orders; v_id uuid; r jsonb; v_factor numeric; v_sort int := 0;
+  v_today date;
+begin
+  perform app.require_permission('orders.create', p_location);
+  if p_id is null and p_client_key is not null then
+    select id into v_id from public.commissary_orders where client_key = p_client_key;
+    if v_id is not null then return v_id; end if;
+  end if;
+  select * into v_v from public.vendors where id = p_vendor and organization_id = v_org and kind = 'commissary' and active;
+  if v_v.id is null then raise exception 'Commissary not found'; end if;
+  if v_v.supplying_location_id = p_location then raise exception 'The commissary cannot order from itself'; end if;
+  v_today := (now() at time zone (select timezone from public.locations where id = p_location))::date;
+  if p_needed is null or p_needed < v_today then raise exception 'The needed date cannot be in the past'; end if;
+  if p_id is null then
+    insert into public.commissary_orders (organization_id, order_number, location_id, vendor_id, commissary_location_id, needed_date, notes, client_key, created_by)
+    values (v_org, app.next_doc_number(v_org, 'CO'), p_location, p_vendor, v_v.supplying_location_id, p_needed, nullif(btrim(p_notes), ''), p_client_key, auth.uid())
+    returning id into v_id;
+  else
+    select * into v_o from public.commissary_orders where id = p_id for update;
+    if v_o.id is null or v_o.location_id <> p_location then raise exception 'Order not found'; end if;
+    if v_o.status <> 'draft' then raise exception 'Order % is % and can no longer be edited', v_o.order_number, v_o.status using errcode = 'P0003'; end if;
+    update public.commissary_orders set vendor_id = p_vendor, commissary_location_id = v_v.supplying_location_id, needed_date = p_needed,
+           notes = nullif(btrim(p_notes), '') where id = p_id;
+    delete from public.commissary_order_items where order_id = p_id;
+    v_id := p_id;
+  end if;
+  for r in select * from jsonb_array_elements(coalesce(p_lines, '[]'::jsonb)) loop
+    v_sort := v_sort + 1;
+    continue when coalesce(nullif(r ->> 'qty', '')::numeric, 0) = 0;
+    if (r ->> 'qty')::numeric < 0 then raise exception 'Quantities cannot be negative'; end if;
+    if not exists (select 1 from public.products where id = (r ->> 'product_id')::uuid and organization_id = v_org and active) then
+      raise exception 'Product not found';
+    end if;
+    v_factor := app.unit_factor((r ->> 'product_id')::uuid, (r ->> 'unit_id')::uuid);
+    if v_factor is null then raise exception 'That unit has no conversion for this product' using errcode = '22023'; end if;
+    insert into public.commissary_order_items (order_id, product_id, unit_id, unit_factor, qty_ordered, notes, sort)
+    values (v_id, (r ->> 'product_id')::uuid, (r ->> 'unit_id')::uuid, v_factor, (r ->> 'qty')::numeric, nullif(btrim(r ->> 'notes'), ''), v_sort)
+    on conflict (order_id, product_id, unit_id) do update set qty_ordered = public.commissary_order_items.qty_ordered + excluded.qty_ordered;
+  end loop;
+  perform app.audit(v_org, p_location, case when p_id is null then 'create' else 'update' end, 'commissary_order', v_id::text,
+    'Commissary order ' || (select order_number from public.commissary_orders where id = v_id), null,
+    jsonb_build_object('needed_date', p_needed, 'lines', jsonb_array_length(coalesce(p_lines, '[]'::jsonb))));
+  return v_id;
+end $$;
+
+create or replace function app.commissary_email_payload(p_order uuid) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select jsonb_build_object('template', 'commissary_order', 'order_id', o.id, 'order_number', o.order_number, 'needed_date', o.needed_date,
+           'notes', o.notes, 'restaurant', l.code || ' ' || l.name, 'commissary', c.name,
+           'submitted_by', coalesce((select display_name from public.employees where id = app.current_employee_id()),
+                                    (select full_name from public.profiles where id = auth.uid())),
+           'lines', (select coalesce(jsonb_agg(jsonb_build_object('name', p.name, 'qty', i.qty_ordered, 'unit', u.code, 'notes', i.notes) order by i.sort, p.name), '[]'::jsonb)
+                     from public.commissary_order_items i join public.products p on p.id = i.product_id join public.units u on u.id = i.unit_id
+                     where i.order_id = o.id),
+           'link', '/commissary/' || o.id)
+  from public.commissary_orders o join public.locations l on l.id = o.location_id join public.locations c on c.id = o.commissary_location_id
+  where o.id = p_order
+$$;
+
+create or replace function public.submit_commissary_order(p_order uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_o public.commissary_orders; v_loc public.locations;
+begin
+  select * into v_o from public.commissary_orders where id = p_order for update;
+  if v_o.id is null then raise exception 'Order not found'; end if;
+  perform app.require_permission('orders.create', v_o.location_id);
+  if v_o.status <> 'draft' then raise exception 'Order % was already submitted (status %)', v_o.order_number, v_o.status using errcode = 'P0003'; end if;
+  if not exists (select 1 from public.commissary_order_items where order_id = p_order) then raise exception 'Add at least one item'; end if;
+  update public.commissary_orders set status = 'submitted', submitted_at = now(), submitted_by = auth.uid() where id = p_order;
+  select * into v_loc from public.locations where id = v_o.location_id;
+  perform app.create_task(v_o.commissary_location_id, format('Prepare %s for #%s %s', v_o.order_number, v_loc.code, v_loc.name), 'custom',
+    app.local_ts(v_o.commissary_location_id, v_o.needed_date, '06:00'), 'Commissary order needed ' || to_char(v_o.needed_date, 'Dy Mon DD'),
+    'commissary_order', p_order, 'co_prepare:' || p_order);
+  perform app.queue_email(v_o.organization_id, v_o.commissary_location_id, 'commissary_order', 'commissary_order:' || p_order || ':submitted',
+    format('Commissary Order %s — #%s %s, needed %s', v_o.order_number, v_loc.code, v_loc.name, to_char(v_o.needed_date, 'FMDay, Mon FMDD')),
+    app.commissary_email_payload(p_order), array[v_o.location_id]);
+  perform app.audit(v_o.organization_id, v_o.location_id, 'submit', 'commissary_order', p_order::text, 'Submitted ' || v_o.order_number, null, null);
+end $$;
+
+-- Commissary staff move the order along. Forward only; skipping steps is allowed.
+create or replace function public.set_commissary_status(p_order uuid, p_status public.commissary_order_status, p_reason text default null) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_o public.commissary_orders;
+  v_rank int; v_new int;
+  ranks constant text[] := array['draft', 'submitted', 'accepted', 'preparing', 'ready', 'in_transit', 'received'];
+begin
+  select * into v_o from public.commissary_orders where id = p_order for update;
+  if v_o.id is null then raise exception 'Order not found'; end if;
+  if p_status = 'cancelled' then
+    if v_o.status in ('in_transit', 'received', 'cancelled') then raise exception 'Order % is % and cannot be cancelled', v_o.order_number, v_o.status; end if;
+    if not (app.has_permission('orders.create', v_o.location_id) or app.has_permission('inventory.transfer', v_o.commissary_location_id)) then
+      raise exception 'Permission denied' using errcode = '42501';
+    end if;
+    if v_o.status <> 'draft' and coalesce(btrim(p_reason), '') = '' then raise exception 'A reason is required to cancel a submitted order'; end if;
+    update public.commissary_orders set status = 'cancelled', cancelled_at = now(), cancelled_by = auth.uid(), cancel_reason = p_reason where id = p_order;
+    perform app.complete_tasks_for(p_order, 'custom');
+  else
+    if p_status not in ('accepted', 'preparing', 'ready') then raise exception 'Use Ship or Receive for %', p_status; end if;
+    perform app.require_permission('inventory.transfer', v_o.commissary_location_id);
+    v_rank := array_position(ranks, v_o.status::text); v_new := array_position(ranks, p_status::text);
+    if v_o.status = 'draft' or v_o.status = 'cancelled' or v_rank is null or v_new <= v_rank or v_rank >= 6 then
+      raise exception 'Order % is % and cannot move to %', v_o.order_number, v_o.status, p_status using errcode = 'P0003';
+    end if;
+    update public.commissary_orders set status = p_status,
+      accepted_at = case when p_status in ('accepted', 'preparing', 'ready') then coalesce(accepted_at, now()) else accepted_at end,
+      preparing_at = case when p_status in ('preparing', 'ready') then coalesce(preparing_at, now()) else preparing_at end,
+      ready_at = case when p_status = 'ready' then now() else ready_at end
+    where id = p_order;
+  end if;
+  perform app.audit(v_o.organization_id, case when p_status = 'cancelled' then v_o.location_id else v_o.commissary_location_id end,
+    'status', 'commissary_order', p_order::text, format('%s: %s -> %s', v_o.order_number, v_o.status, p_status), null,
+    case when p_reason is not null then jsonb_build_object('reason', p_reason) end);
+end $$;
+
+-- Ship: commissary stock leaves now (TRANSFER_OUT). p_lines: [{id, qty_shipped}] (missing lines ship the ordered qty).
+create or replace function public.ship_commissary_order(p_order uuid, p_lines jsonb default '[]') returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare v_o public.commissary_orders; r jsonb; i record; v_cost numeric; v_at timestamptz := now(); v_loc public.locations; v_value numeric := 0;
+begin
+  select * into v_o from public.commissary_orders where id = p_order for update;
+  if v_o.id is null then raise exception 'Order not found'; end if;
+  perform app.require_permission('inventory.transfer', v_o.commissary_location_id);
+  if v_o.status not in ('submitted', 'accepted', 'preparing', 'ready') then
+    raise exception 'Order % is % and cannot be shipped', v_o.order_number, v_o.status using errcode = 'P0003';
+  end if;
+  for r in select * from jsonb_array_elements(coalesce(p_lines, '[]'::jsonb)) loop
+    if nullif(r ->> 'qty_shipped', '')::numeric < 0 then raise exception 'Shipped quantities cannot be negative'; end if;
+    update public.commissary_order_items set qty_shipped = nullif(r ->> 'qty_shipped', '')::numeric
+     where id = (r ->> 'id')::uuid and order_id = p_order;
+  end loop;
+  update public.commissary_order_items set qty_shipped = qty_ordered where order_id = p_order and qty_shipped is null;
+  if not exists (select 1 from public.commissary_order_items where order_id = p_order and qty_shipped > 0) then
+    raise exception 'Nothing to ship. Cancel the order instead.';
+  end if;
+  for i in select * from public.commissary_order_items where order_id = p_order loop
+    v_cost := app.current_unit_cost(v_o.commissary_location_id, i.product_id);
+    update public.commissary_order_items set unit_cost = v_cost where id = i.id;
+    if i.qty_shipped > 0 then
+      perform app.post_inventory_txn(v_o.commissary_location_id, i.product_id, 'TRANSFER_OUT', -round(i.qty_shipped * i.unit_factor, 4), v_cost, v_at,
+                                     'commissary_order', p_order, i.id, null, null, v_o.order_number);
+      v_value := v_value + i.qty_shipped * i.unit_factor * v_cost;
+    end if;
+  end loop;
+  update public.commissary_orders set status = 'in_transit', shipped_at = v_at, shipped_by = auth.uid(),
+    accepted_at = coalesce(accepted_at, v_at), ready_at = coalesce(ready_at, v_at) where id = p_order;
+  perform app.complete_tasks_for(p_order, 'custom');
+  select * into v_loc from public.locations where id = v_o.commissary_location_id;
+  perform app.create_task(v_o.location_id, format('Receive commissary order %s', v_o.order_number), 'receive', v_at + interval '12 hours',
+    'On its way from ' || v_loc.name || '. Count what arrives and confirm.', 'commissary_order', p_order, 'co_receive:' || p_order);
+  perform app.audit(v_o.organization_id, v_o.commissary_location_id, 'ship', 'commissary_order', p_order::text,
+    format('Shipped %s (%s)', v_o.order_number, to_char(v_value, 'FM$999,999,990.00')), null, p_lines);
+  return jsonb_build_object('status', 'in_transit', 'value', round(v_value, 2));
+end $$;
+
+-- Receive at the restaurant: TRANSFER_IN for what arrived; the commissary is
+-- corrected for any difference so commissary-out = restaurant-in.
+-- p_lines: [{id, qty_received}] — every shipped line needs a quantity.
+create or replace function public.receive_commissary_order(p_order uuid, p_lines jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  v_o public.commissary_orders; r jsonb; i record; v_at timestamptz := now(); v_base numeric; v_diff numeric; v_on numeric;
+  v_issues jsonb := '[]'::jsonb; v_value numeric := 0; v_lp public.location_products;
+begin
+  select * into v_o from public.commissary_orders where id = p_order for update;
+  if v_o.id is null then raise exception 'Order not found'; end if;
+  perform app.require_permission('orders.receive', v_o.location_id);
+  if v_o.status <> 'in_transit' then
+    raise exception 'Order % is % — only orders in transit can be received', v_o.order_number, v_o.status using errcode = 'P0003';
+  end if;
+  for r in select * from jsonb_array_elements(coalesce(p_lines, '[]'::jsonb)) loop
+    if nullif(r ->> 'qty_received', '') is null or (r ->> 'qty_received')::numeric < 0 then
+      raise exception 'Enter the received quantity for every item (0 if it did not arrive)';
+    end if;
+    update public.commissary_order_items set qty_received = (r ->> 'qty_received')::numeric where id = (r ->> 'id')::uuid and order_id = p_order;
+  end loop;
+  if exists (select 1 from public.commissary_order_items where order_id = p_order and qty_received is null) then
+    raise exception 'Enter the received quantity for every item (0 if it did not arrive)';
+  end if;
+  for i in select ci.*, p.name from public.commissary_order_items ci join public.products p on p.id = ci.product_id where ci.order_id = p_order loop
+    v_base := round(i.qty_received * i.unit_factor, 4);
+    if v_base > 0 then
+      select * into v_lp from public.location_products where location_id = v_o.location_id and product_id = i.product_id for update;
+      if v_lp.id is null then
+        insert into public.location_products (organization_id, location_id, product_id) values (v_o.organization_id, v_o.location_id, i.product_id)
+        returning * into v_lp;
+      end if;
+      select greatest(coalesce(on_hand, 0), 0) into v_on from public.inventory_balances where location_id = v_o.location_id and product_id = i.product_id;
+      v_on := coalesce(v_on, 0);
+      update public.location_products set
+        avg_cost = case when v_on + v_base > 0 and avg_cost > 0 then round((v_on * avg_cost + v_base * i.unit_cost) / (v_on + v_base), 6) else i.unit_cost end,
+        last_cost = i.unit_cost, last_cost_at = v_at
+      where id = v_lp.id;
+      perform app.post_inventory_txn(v_o.location_id, i.product_id, 'TRANSFER_IN', v_base, i.unit_cost, v_at, 'commissary_order', p_order, i.id, null,
+                                     null, v_o.order_number);
+    end if;
+    v_diff := round((coalesce(i.qty_shipped, 0) - i.qty_received) * i.unit_factor, 4);
+    if v_diff <> 0 then
+      -- shipped but not received goes back on the commissary's books (and vice versa)
+      perform app.post_inventory_txn(v_o.commissary_location_id, i.product_id, 'CORRECTION', v_diff, i.unit_cost, v_at, 'commissary_order', p_order, i.id,
+                                     null, case when v_diff > 0 then 'COMMISSARY_SHORT' else 'COMMISSARY_OVER' end, v_o.order_number,
+                                     format('Shipped %s, restaurant received %s', i.qty_shipped, i.qty_received));
+    end if;
+    if i.qty_received <> i.qty_ordered or i.qty_received <> coalesce(i.qty_shipped, 0) then
+      v_issues := v_issues || jsonb_build_object('product', i.name, 'ordered', i.qty_ordered, 'shipped', i.qty_shipped, 'received', i.qty_received,
+        'difference', i.qty_received - i.qty_ordered,
+        'value', round((i.qty_received - i.qty_ordered) * i.unit_factor * coalesce(i.unit_cost, 0), 2));
+      v_value := v_value + (i.qty_received - i.qty_ordered) * i.unit_factor * coalesce(i.unit_cost, 0);
+    end if;
+  end loop;
+  update public.commissary_orders set status = 'received', received_at = v_at, received_by = auth.uid(),
+    discrepancy_value = case when jsonb_array_length(v_issues) > 0 then round(v_value, 2) end where id = p_order;
+  perform app.complete_tasks_for(p_order, 'receive');
+  if jsonb_array_length(v_issues) > 0 then
+    perform app.raise_alert(v_o.location_id, 'short_delivery', 'warning', 'Commissary discrepancy on ' || v_o.order_number,
+      (select string_agg(format('%s: ordered %s, received %s', x ->> 'product', x ->> 'ordered', x ->> 'received'), '; ') from jsonb_array_elements(v_issues) x),
+      'co_exc:' || p_order, null, 'commissary_order', p_order, jsonb_build_object('issues', v_issues));
+  end if;
+  perform app.audit(v_o.organization_id, v_o.location_id, 'receive', 'commissary_order', p_order::text,
+    format('Received %s%s', v_o.order_number, case when jsonb_array_length(v_issues) > 0 then format(' with %s discrepanc%s', jsonb_array_length(v_issues),
+           case when jsonb_array_length(v_issues) = 1 then 'y' else 'ies' end) else '' end), null, jsonb_build_object('issues', v_issues));
+  return jsonb_build_object('status', 'received', 'issues', v_issues, 'discrepancy_value', round(v_value, 2));
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Incoming stock includes commissary orders (suggested ordering, count review)
+-- ---------------------------------------------------------------------
+create or replace function app.on_order_qty(p_location uuid, p_product uuid, p_exclude_po uuid default null) returns numeric
+language sql stable security definer set search_path = public as $$
+  select coalesce((select sum(greatest(i.order_qty - i.received_qty, 0) * i.unit_factor)
+                   from public.purchase_order_items i join public.purchase_orders po on po.id = i.po_id
+                   where po.location_id = p_location and i.product_id = p_product
+                     and (p_exclude_po is null or po.id <> p_exclude_po)
+                     and po.status in ('submitted', 'confirmed', 'partially_received', 'back_ordered', 'invoice_received', 'ready_to_reconcile')), 0)
+       + coalesce((select sum(case when o.status = 'in_transit' then coalesce(i.qty_shipped, 0) else i.qty_ordered end * i.unit_factor)
+                   from public.commissary_order_items i join public.commissary_orders o on o.id = i.order_id
+                   where o.location_id = p_location and i.product_id = p_product
+                     and o.status in ('submitted', 'accepted', 'preparing', 'ready', 'in_transit')), 0)
+$$;
+
+create or replace function app.in_transit_qty(p_location uuid, p_product uuid) returns numeric
+language sql stable security definer set search_path = public as $$
+  select coalesce((select sum(i.qty_sent * i.unit_factor)
+                   from public.inventory_transfer_items i join public.inventory_transfers t on t.id = i.transfer_id
+                   where t.to_location_id = p_location and i.product_id = p_product and t.status in ('sent', 'in_transit', 'received')), 0)
+       + coalesce((select sum(coalesce(i.qty_shipped, 0) * i.unit_factor)
+                   from public.commissary_order_items i join public.commissary_orders o on o.id = i.order_id
+                   where o.location_id = p_location and i.product_id = p_product and o.status = 'in_transit'), 0)
+$$;
+
+-- Daily/weekly reports mention commissary activity.
+create or replace function app.commissary_summary(p_location uuid, p_from date, p_to date) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'received', (select count(*) from public.commissary_orders where location_id = p_location and status = 'received'
+                   and (received_at at time zone (select timezone from public.locations where id = p_location))::date between p_from and p_to),
+    'value', (select coalesce(round(sum(i.qty_received * i.unit_factor * coalesce(i.unit_cost, 0)), 2), 0)
+              from public.commissary_order_items i join public.commissary_orders o on o.id = i.order_id
+              where o.location_id = p_location and o.status = 'received'
+                and (o.received_at at time zone (select timezone from public.locations where id = p_location))::date between p_from and p_to),
+    'discrepancies', (select count(*) from public.commissary_orders where location_id = p_location and status = 'received' and discrepancy_value is not null
+                   and (received_at at time zone (select timezone from public.locations where id = p_location))::date between p_from and p_to),
+    'open', (select count(*) from public.commissary_orders where location_id = p_location and status in ('submitted', 'accepted', 'preparing', 'ready', 'in_transit')))
+$$;
+
+select app.apply_grants();
+
+-- ============================================================================
+-- 20260930002600_email.sql
+-- ============================================================================
+-- =====================================================================
+-- EMAIL: recipients, per-report subscriptions, outbox, report data
+--
+-- Every email is a row in email_outbox with a unique dedupe_key, written in
+-- the same transaction as the event that caused it (an alert, a submitted
+-- commissary order, the daily schedule). A server job renders and sends
+-- pending rows (Resend) and records the result, so an email is never lost
+-- when a request fails and never sent twice.
+-- =====================================================================
+
+-- The server's scheduled jobs call the API with the service-role key.
+create or replace function app.is_service_role() returns boolean
+language sql stable as $$
+  select coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role', '') = 'service_role'
+$$;
+
+create or replace function app.is_trusted_caller() returns boolean
+language sql stable as $$
+  select app.is_system_caller() or app.is_service_role()
+$$;
+
+-- Server jobs act for every location (service_role already bypasses RLS).
+create or replace function app.user_location_ids() returns setof uuid
+language sql stable security definer set search_path = public as $$
+  select distinct l.id
+  from public.user_roles ur
+  join public.organization_members m on m.organization_id = ur.organization_id and m.user_id = ur.user_id and m.active
+  join public.locations l on l.organization_id = ur.organization_id
+  where ur.user_id = auth.uid()
+    and (   ur.scope_type = 'organization'
+         or (ur.scope_type = 'region'   and ur.scope_id = l.region_id)
+         or (ur.scope_type = 'district' and ur.scope_id = l.district_id)
+         or (ur.scope_type = 'location' and ur.scope_id = l.id))
+  union
+  select l.id from public.locations l where app.is_trusted_caller()
+$$;
+
+create or replace function app.require_location_access(p_location uuid) returns void
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if app.is_trusted_caller() then return; end if;
+  if not (p_location in (select app.user_location_ids())) then raise exception 'Location not found' using errcode = '42501'; end if;
+end $$;
+
+create or replace function app.require_report_access(p_perm text, p_location uuid) returns void
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if app.is_trusted_caller() then return; end if;
+  perform app.require_permission(p_perm, p_location);
+end $$;
+
+-- ---------------------------------------------------------------------
+-- What can be emailed
+-- ---------------------------------------------------------------------
+create table public.email_kinds (
+  key         text primary key,
+  label       text not null,
+  description text not null,
+  category    text not null check (category in ('report', 'alert', 'operations')),
+  sort        integer not null
+);
+insert into public.email_kinds values
+  ('daily_report',          'Daily report',                 'Yesterday''s sales, waste, deliveries, stock and what needs attention (6 AM).', 'report', 1),
+  ('weekly_report',         'Weekly report',                'Sales, purchases, inventory, food cost, waste, variances and vendor spending for last week (Monday 6 AM).', 'report', 2),
+  ('monthly_report',        'Monthly owner report',         'Month totals, food cost, AvT, waste, vendor price trends, best/worst weeks, month over month (1st, 6 AM).', 'report', 3),
+  ('waste_alert',           'High waste',                   'Waste this week went over the limit.', 'alert', 10),
+  ('variance_alert',        'Inventory variance',           'A posted count lost more than the dollar tolerance on an item.', 'alert', 11),
+  ('delivery_discrepancy',  'Delivery discrepancies',       'Short, over, missing, damaged or rejected items, invoice differences, temperature failures.', 'alert', 12),
+  ('price_alert',           'Price increases',              'A vendor price rose more than the price-alert percentage.', 'alert', 13),
+  ('critical_stock',        'Critical / out of stock',      'Once a day: items at or below minimum or out.', 'alert', 14),
+  ('low_stock',             'Low stock',                    'Once a day: items below the reorder point.', 'alert', 15),
+  ('inventory_due',         'Inventory due',                'Once a day while no count has been posted for 7 days.', 'operations', 20),
+  ('vendor_order_reminder', 'Vendor order reminders',       'A vendor''s order cutoff is within 4 hours and nothing is marked as ordered.', 'operations', 21),
+  ('commissary_order',      'Commissary orders',            'A restaurant submitted a commissary order.', 'operations', 22),
+  ('sync_failure',          'Failed sync',                  'Toast sales could not be processed.', 'alert', 23);
+
+create table public.email_recipients (
+  id              uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  location_id     uuid references public.locations(id) on delete cascade,   -- null = every location
+  name            text not null check (length(btrim(name)) > 0),
+  email           text not null check (email ~* '^[^@\s]+@[^@\s]+\.[^@\s]+$'),
+  active          boolean not null default true,
+  created_by      uuid references public.profiles(id),
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+create unique index email_recipients_uniq on public.email_recipients (organization_id, lower(email), coalesce(location_id, '00000000-0000-0000-0000-000000000000'::uuid));
+create trigger trg_email_recipients_touch before update on public.email_recipients for each row execute function app.touch_updated_at();
+create trigger trg_email_recipients_audit after insert or update on public.email_recipients for each row execute function app.audit_row();
+
+create table public.email_subscriptions (
+  recipient_id    uuid not null references public.email_recipients(id) on delete cascade,
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  kind            text not null references public.email_kinds(key),
+  primary key (recipient_id, kind)
+);
+
+create table public.email_outbox (
+  id              uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  location_id     uuid references public.locations(id) on delete cascade,
+  kind            text not null references public.email_kinds(key),
+  dedupe_key      text not null unique,
+  subject         text not null,
+  payload         jsonb not null,
+  recipients      text[] not null default '{}',
+  status          text not null default 'pending' check (status in ('pending', 'sending', 'sent', 'failed', 'skipped')),
+  attempts        integer not null default 0,
+  last_error      text,
+  provider_id     text,
+  created_at      timestamptz not null default now(),
+  claimed_at      timestamptz,
+  sent_at         timestamptz
+);
+create index on public.email_outbox (status, created_at);
+create index on public.email_outbox (organization_id, created_at desc);
+
+insert into app.write_protected_tables values ('email_kinds'), ('email_recipients'), ('email_subscriptions'), ('email_outbox');
+
+alter table public.email_kinds enable row level security;
+alter table public.email_recipients enable row level security;
+alter table public.email_subscriptions enable row level security;
+alter table public.email_outbox enable row level security;
+create policy email_kinds_select on public.email_kinds for select to authenticated using (true);
+create policy email_recipients_select on public.email_recipients for select to authenticated
+  using (app.has_org_permission('settings.manage', organization_id));
+create policy email_subscriptions_select on public.email_subscriptions for select to authenticated
+  using (app.has_org_permission('settings.manage', organization_id));
+-- Outbox payloads contain financial data: owners/admins only.
+create policy email_outbox_select on public.email_outbox for select to authenticated
+  using (app.has_org_permission('settings.manage', organization_id));
+
+-- ---------------------------------------------------------------------
+-- Recipients (owners / settings.manage at company level)
+-- ---------------------------------------------------------------------
+create or replace function public.save_email_recipient(p_org uuid, p_id uuid, p_name text, p_email text, p_location uuid,
+                                                       p_active boolean, p_kinds text[])
+returns uuid
+language plpgsql security definer set search_path = public as $$
+declare v_id uuid; v_bad text;
+begin
+  perform app.require_org_permission('settings.manage', p_org);
+  if p_location is not null and app.location_org(p_location) is distinct from p_org then raise exception 'Location not in organization'; end if;
+  select k into v_bad from unnest(coalesce(p_kinds, '{}')) k where k not in (select key from public.email_kinds) limit 1;
+  if v_bad is not null then raise exception 'Unknown email type %', v_bad; end if;
+  if p_id is null then
+    insert into public.email_recipients (organization_id, location_id, name, email, active, created_by)
+    values (p_org, p_location, btrim(p_name), lower(btrim(p_email)), coalesce(p_active, true), auth.uid()) returning id into v_id;
+  else
+    update public.email_recipients set name = btrim(p_name), email = lower(btrim(p_email)), location_id = p_location, active = coalesce(p_active, active)
+    where id = p_id and organization_id = p_org returning id into v_id;
+    if v_id is null then raise exception 'Recipient not found'; end if;
+  end if;
+  delete from public.email_subscriptions where recipient_id = v_id and not (kind = any(coalesce(p_kinds, '{}')));
+  insert into public.email_subscriptions (recipient_id, organization_id, kind)
+  select v_id, p_org, k from unnest(coalesce(p_kinds, '{}')) k on conflict do nothing;
+  perform app.audit(p_org, p_location, 'subscriptions', 'email_recipient', v_id::text, 'Email settings for ' || lower(btrim(p_email)),
+                    null, jsonb_build_object('kinds', p_kinds, 'active', p_active));
+  return v_id;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Queue an email. Recipients are resolved now (who was subscribed when it
+-- happened). No subscribers -> stored as "skipped" so it is still visible.
+-- ---------------------------------------------------------------------
+create or replace function app.queue_email(p_org uuid, p_location uuid, p_kind text, p_dedupe text, p_subject text, p_payload jsonb,
+                                           p_extra_locations uuid[] default '{}', p_rate_limit integer default null)
+returns uuid
+language plpgsql security definer set search_path = public as $$
+declare v_to text[]; v_id uuid; v_recent integer; v_status text := 'pending'; v_err text;
+begin
+  select array_agg(distinct r.email order by r.email) into v_to
+  from public.email_recipients r join public.email_subscriptions s on s.recipient_id = r.id and s.kind = p_kind
+  where r.organization_id = p_org and r.active
+    and (r.location_id is null or r.location_id = p_location or r.location_id = any(coalesce(p_extra_locations, '{}')));
+  if v_to is null then v_status := 'skipped'; v_err := 'No recipients are subscribed to this email'; end if;
+  if v_status = 'pending' and p_rate_limit is not null then
+    select count(*) into v_recent from public.email_outbox
+     where location_id is not distinct from p_location and kind = p_kind and status in ('pending', 'sending', 'sent') and created_at > now() - interval '1 hour';
+    if v_recent >= p_rate_limit then v_status := 'skipped'; v_err := format('Rate limited (%s %s emails in the last hour); included in the daily report', v_recent, p_kind); end if;
+  end if;
+  insert into public.email_outbox (organization_id, location_id, kind, dedupe_key, subject, payload, recipients, status, last_error)
+  values (p_org, p_location, p_kind, p_dedupe, p_subject,
+          p_payload || jsonb_build_object('location', (select jsonb_build_object('id', l.id, 'code', l.code, 'name', l.name, 'timezone', l.timezone)
+                                                       from public.locations l where l.id = p_location),
+                                          'organization', (select name from public.organizations where id = p_org)),
+          coalesce(v_to, '{}'), v_status, v_err)
+  on conflict (dedupe_key) do nothing
+  returning id into v_id;
+  return v_id;
+end $$;
+
+-- Immediate alert emails: queued when an alert is first raised (not when it is refreshed).
+create or replace function app.alert_email_kind(p_type public.alert_type) returns text
+language sql immutable as $$
+  select case p_type
+    when 'high_waste' then 'waste_alert'
+    when 'high_variance' then 'variance_alert'
+    when 'short_delivery' then 'delivery_discrepancy'
+    when 'invoice_difference' then 'delivery_discrepancy'
+    when 'temperature_failure' then 'delivery_discrepancy'
+    when 'price_increase' then 'price_alert'
+  end
+$$;
+
+create or replace function app.raise_alert(
+  p_location uuid, p_type public.alert_type, p_severity text, p_title text, p_message text,
+  p_dedupe text, p_product uuid default null, p_entity_type text default null, p_entity_id uuid default null,
+  p_data jsonb default '{}'::jsonb
+) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_id uuid; v_new boolean; v_kind text := app.alert_email_kind(p_type);
+begin
+  insert into public.alerts (organization_id, location_id, alert_type, severity, title, message, product_id, entity_type, entity_id, dedupe_key, data)
+  values (app.location_org(p_location), p_location, p_type, p_severity, p_title, p_message, p_product, p_entity_type, p_entity_id, p_dedupe, p_data)
+  on conflict (location_id, dedupe_key) where status <> 'resolved'
+  do update set title = excluded.title, message = excluded.message, severity = excluded.severity, data = excluded.data
+  returning id, (xmax = 0) into v_id, v_new;
+  if v_new and v_kind is not null then
+    perform app.queue_email(app.location_org(p_location), p_location, v_kind, 'alert:' || v_id, p_title,
+      jsonb_build_object('template', 'alert', 'alert_type', p_type, 'severity', p_severity, 'title', p_title, 'message', p_message,
+                         'entity_type', p_entity_type, 'entity_id', p_entity_id, 'product_id', p_product, 'data', p_data,
+                         'raised_at', now()),
+      '{}', 10);
+  end if;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Report data (jsonb snapshots stored in the outbox payload)
+-- ---------------------------------------------------------------------
+create or replace function app.local_ts(p_location uuid, p_date date, p_time time default '00:00') returns timestamptz
+language sql stable security definer set search_path = public as $$
+  select (p_date::timestamp + p_time) at time zone (select timezone from public.locations where id = p_location)
+$$;
+
+-- Food-cost window for a period: count to count when posted counts bracket the
+-- period (the usual Sunday-night count), otherwise book inventory at the edges.
+create or replace function app.period_food_cost(p_location uuid, p_from date, p_to date) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare
+  v_start timestamptz := app.local_ts(p_location, p_from);
+  v_end timestamptz := app.local_ts(p_location, p_to + 1);
+  v_b public.count_sessions; v_e public.count_sessions; v_f timestamptz; v_t timestamptz; v jsonb;
+begin
+  select * into v_b from public.count_sessions where location_id = p_location and status = 'posted'
+     and count_at <= v_start + interval '12 hours' and count_at >= v_start - interval '3 days' order by count_at desc limit 1;
+  select * into v_e from public.count_sessions where location_id = p_location and status = 'posted'
+     and count_at <= v_end + interval '12 hours' and count_at > coalesce(v_b.count_at, v_start) order by count_at desc limit 1;
+  v_f := coalesce(v_b.count_at, v_start);
+  v_t := coalesce(v_e.count_at, least(v_end, now()));
+  v := public.food_cost_summary(p_location, v_f, v_t, array['food']);
+  return v || jsonb_build_object('basis', case when v_b.id is not null and v_e.id is not null then 'count_to_count' else 'book' end,
+                                 'begin_count', v_b.name, 'end_count', v_e.name, 'window_from', v_f, 'window_to', v_t);
+end $$;
+
+create or replace function app.attention_items(p_location uuid, p_limit integer default 8) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_agg(jsonb_build_object('title', a.title, 'message', a.message, 'severity', a.severity, 'type', a.alert_type)
+                            order by case a.severity when 'critical' then 0 when 'warning' then 1 else 2 end, a.created_at desc), '[]'::jsonb)
+  from (select * from public.alerts where location_id = p_location and status = 'open'
+          and alert_type not in ('low_stock')
+        order by case severity when 'critical' then 0 when 'warning' then 1 else 2 end, created_at desc limit p_limit) a
+$$;
+
+create or replace function app.daily_report_data(p_location uuid, p_day date) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare v_sales public.sales_imports; v jsonb;
+begin
+  select * into v_sales from public.sales_imports where location_id = p_location and business_date = p_day and status = 'posted';
+  select jsonb_build_object(
+    'template', 'daily', 'date', p_day,
+    'sales', v_sales.net_sales, 'guests', v_sales.guest_count,
+    'theoretical_cost', v_sales.theoretical_cost,
+    'theoretical_pct', case when v_sales.net_sales > 0 then round(v_sales.theoretical_cost / v_sales.net_sales * 100, 1) end,
+    'waste', (select coalesce(sum(total_cost), 0) from public.waste_logs where location_id = p_location and business_date = p_day),
+    'waste_entries', (select count(*) from public.waste_logs where location_id = p_location and business_date = p_day),
+    'deliveries', (select count(*) from public.receipts where location_id = p_location and delivery_date = p_day and status in ('received', 'posted')),
+    'delivery_issues', (select count(distinct r.id) from public.receipts r join public.receipt_items ri on ri.receipt_id = r.id
+                         where r.location_id = p_location and r.delivery_date = p_day and r.status in ('received', 'posted') and cardinality(ri.exception_codes) > 0),
+    'delivery_issue_list', (select coalesce(jsonb_agg(x), '[]'::jsonb) from (
+                         select v.name as vendor, r.invoice_number, r.receipt_number,
+                                (select string_agg(distinct c, ', ') from public.receipt_items ri, unnest(ri.exception_codes) c where ri.receipt_id = r.id) as issues
+                         from public.receipts r join public.vendors v on v.id = r.vendor_id
+                         where r.location_id = p_location and r.delivery_date = p_day and r.status in ('received', 'posted')
+                           and exists (select 1 from public.receipt_items ri where ri.receipt_id = r.id and cardinality(ri.exception_codes) > 0)) x),
+    'low_stock', (select count(*) from public.current_inventory where location_id = p_location and active and stock_status = 'low'),
+    'critical_stock', (select count(*) from public.current_inventory where location_id = p_location and active and stock_status in ('critical', 'out', 'negative')),
+    'commissary', app.commissary_summary(p_location, p_day, p_day),
+    'attention', app.attention_items(p_location, 8)
+  ) into v;
+  return v;
+end $$;
+
+create or replace function app.period_report_data(p_location uuid, p_from date, p_to date, p_template text) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare
+  v_start timestamptz := app.local_ts(p_location, p_from);
+  v_end timestamptz := app.local_ts(p_location, p_to + 1);
+  v_fc jsonb := app.period_food_cost(p_location, p_from, p_to);
+  v jsonb;
+begin
+  select jsonb_build_object(
+    'template', p_template, 'from', p_from, 'to', p_to,
+    'sales', (select coalesce(sum(net_sales), 0) from public.sales_imports where location_id = p_location and status = 'posted' and business_date between p_from and p_to),
+    'sales_days', (select count(*) from public.sales_imports where location_id = p_location and status = 'posted' and business_date between p_from and p_to),
+    'purchases', (select coalesce(sum(coalesce(r.invoice_total, (public.receipt_totals(r.id) ->> 'calculated_total')::numeric)), 0)
+                  from public.receipts r where r.location_id = p_location and r.status = 'posted' and r.delivery_date between p_from and p_to),
+    'food_cost', v_fc,
+    'waste', (select coalesce(sum(total_cost), 0) from public.waste_logs where location_id = p_location and business_date between p_from and p_to),
+    'top_waste', (select coalesce(jsonb_agg(x order by x.cost desc), '[]'::jsonb) from (
+        select coalesce(p.name, r.name) as name, round(sum(w.total_cost), 2) as cost from public.waste_logs w
+        left join public.products p on p.id = w.product_id left join public.recipes r on r.id = w.recipe_id
+        where w.location_id = p_location and w.business_date between p_from and p_to group by 1 order by 2 desc limit 5) x),
+    'inventory_variance', (select coalesce(sum(pl.variance_value), 0) from public.count_posting_lines pl join public.count_sessions s on s.id = pl.session_id
+                           where s.location_id = p_location and s.status = 'posted' and s.count_at >= v_start and s.count_at < v_end + interval '12 hours'),
+    'top_variances', (select coalesce(jsonb_agg(x order by x.value), '[]'::jsonb) from (
+        select p.name, u.code as unit, round(sum(pl.variance_qty), 2) as qty, round(sum(pl.variance_value), 2) as value
+        from public.count_posting_lines pl join public.count_sessions s on s.id = pl.session_id
+        join public.products p on p.id = pl.product_id join public.units u on u.id = p.inventory_unit_id
+        where s.location_id = p_location and s.status = 'posted' and s.count_at >= v_start and s.count_at < v_end + interval '12 hours'
+        group by p.name, u.code having sum(pl.variance_value) < 0 order by 4 limit 5) x),
+    'vendor_spending', (select coalesce(jsonb_agg(x order by x.total desc), '[]'::jsonb) from (
+        select v.name as vendor, count(*) as deliveries,
+               round(sum(coalesce(r.invoice_total, (public.receipt_totals(r.id) ->> 'calculated_total')::numeric)), 2) as total
+        from public.receipts r join public.vendors v on v.id = r.vendor_id
+        where r.location_id = p_location and r.status = 'posted' and r.delivery_date between p_from and p_to group by v.name) x),
+    'commissary', app.commissary_summary(p_location, p_from, p_to),
+    'price_alerts', (select coalesce(jsonb_agg(jsonb_build_object('title', a.title, 'message', a.message) order by a.created_at desc), '[]'::jsonb)
+                     from public.alerts a where a.location_id = p_location and a.alert_type = 'price_increase' and a.created_at >= v_start and a.created_at < v_end),
+    'delivery_discrepancies', (select coalesce(jsonb_agg(x order by x.delivery_date), '[]'::jsonb) from (
+        select v.name as vendor, r.invoice_number, r.receipt_number, r.delivery_date,
+               (select string_agg(distinct c, ', ') from public.receipt_items ri, unnest(ri.exception_codes) c where ri.receipt_id = r.id) as issues
+        from public.receipts r join public.vendors v on v.id = r.vendor_id
+        where r.location_id = p_location and r.delivery_date between p_from and p_to and r.status in ('received', 'posted')
+          and exists (select 1 from public.receipt_items ri where ri.receipt_id = r.id and cardinality(ri.exception_codes) > 0)) x),
+    'low_stock', (select coalesce(jsonb_agg(jsonb_build_object('name', product_name, 'on_hand', round(on_hand, 2), 'unit', inventory_unit, 'status', stock_status)
+                                            order by case stock_status when 'negative' then 0 when 'out' then 1 when 'critical' then 2 else 3 end, product_name), '[]'::jsonb)
+                  from public.current_inventory where location_id = p_location and active and stock_status <> 'ok'),
+    'counts', (select coalesce(jsonb_agg(jsonb_build_object('name', s.name, 'status', s.status, 'count_at', s.count_at, 'type', s.count_type) order by s.count_at), '[]'::jsonb)
+               from public.count_sessions s where s.location_id = p_location and s.count_at >= v_start and s.count_at < v_end + interval '12 hours' and s.status <> 'cancelled')
+  ) into v;
+  return v;
+end $$;
+
+create or replace function app.monthly_report_data(p_location uuid, p_month date) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare
+  v_from date := date_trunc('month', p_month)::date;
+  v_to date := (date_trunc('month', p_month) + interval '1 month - 1 day')::date;
+  v_prev_from date := (date_trunc('month', p_month) - interval '1 month')::date;
+  v_prev_to date := (date_trunc('month', p_month) - interval '1 day')::date;
+  v jsonb; v_prev jsonb; v_weeks jsonb; w date;
+begin
+  v := app.period_report_data(p_location, v_from, v_to, 'monthly');
+  v_prev := app.period_report_data(p_location, v_prev_from, v_prev_to, 'monthly');
+  -- weeks (Mon-Sun) that end inside the month, each with its own count-to-count food cost
+  select coalesce(jsonb_agg(x order by x ->> 'from'), '[]'::jsonb) into v_weeks from (
+    select jsonb_build_object('from', d::date, 'to', (d + interval '6 days')::date,
+             'sales', (select coalesce(sum(net_sales), 0) from public.sales_imports where location_id = p_location and status = 'posted' and business_date between d::date and (d + interval '6 days')::date),
+             'food_cost', app.period_food_cost(p_location, d::date, (d + interval '6 days')::date)) as x
+    from generate_series(date_trunc('week', v_from::timestamp), v_to::timestamp, interval '7 days') d
+    where (d + interval '6 days')::date between v_from and v_to) q;
+  return v || jsonb_build_object(
+    'template', 'monthly', 'month', to_char(v_from, 'YYYY-MM'),
+    'previous', jsonb_build_object('sales', v_prev -> 'sales', 'purchases', v_prev -> 'purchases', 'waste', v_prev -> 'waste',
+                                   'actual_pct', v_prev -> 'food_cost' -> 'actual_pct', 'theoretical_pct', v_prev -> 'food_cost' -> 'theoretical_pct',
+                                   'inventory_variance', v_prev -> 'inventory_variance'),
+    'weeks', v_weeks,
+    'turnover', case when ((v -> 'food_cost' ->> 'begin_inventory')::numeric + (v -> 'food_cost' ->> 'end_inventory')::numeric) > 0
+                     then round((v -> 'food_cost' ->> 'actual_cost')::numeric
+                                / (((v -> 'food_cost' ->> 'begin_inventory')::numeric + (v -> 'food_cost' ->> 'end_inventory')::numeric) / 2), 2) end,
+    'price_trends', (select coalesce(jsonb_agg(x order by abs((x ->> 'pct')::numeric) desc), '[]'::jsonb) from (
+        select jsonb_build_object('product', p.name, 'vendor', v2.name, 'unit', u.code, 'first', f.base_unit_price, 'last', l.base_unit_price,
+                                  'pct', round((l.base_unit_price / nullif(f.base_unit_price, 0) - 1) * 100, 1)) as x
+        from (select distinct product_id, vendor_id from public.price_history
+              where location_id = p_location and effective_at >= app.local_ts(p_location, v_from) and effective_at < app.local_ts(p_location, v_to + 1)) pv
+        join public.products p on p.id = pv.product_id join public.units u on u.id = p.inventory_unit_id
+        left join public.vendors v2 on v2.id = pv.vendor_id
+        cross join lateral (select base_unit_price from public.price_history ph where ph.location_id = p_location and ph.product_id = pv.product_id
+                              and ph.vendor_id is not distinct from pv.vendor_id and ph.effective_at < app.local_ts(p_location, v_to + 1)
+                              and ph.effective_at < app.local_ts(p_location, v_from) order by effective_at desc limit 1) f
+        cross join lateral (select base_unit_price from public.price_history ph where ph.location_id = p_location and ph.product_id = pv.product_id
+                              and ph.vendor_id is not distinct from pv.vendor_id and ph.effective_at < app.local_ts(p_location, v_to + 1)
+                              order by effective_at desc limit 1) l
+        where f.base_unit_price is distinct from l.base_unit_price
+        limit 10) q));
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Schedule: called every 15 minutes by the server job (service role).
+-- ---------------------------------------------------------------------
+create or replace function public.run_email_schedule() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  l record; v_local timestamp; v_today date; v_n int := 0; v_id uuid; v_data jsonb; s record; v_week_start date;
+  v_items jsonb;
+begin
+  if not app.is_trusted_caller() then raise exception 'Server job only' using errcode = '42501'; end if;
+  for l in select * from public.locations where active loop
+    begin
+      v_local := now() at time zone l.timezone;
+      v_today := v_local::date;
+      perform public.refresh_stock_alerts(l.id);
+      perform public.refresh_operational_alerts(l.id);
+      if extract(hour from v_local) >= 6 then
+        -- daily report for yesterday
+        if not exists (select 1 from public.email_outbox where dedupe_key = 'daily:' || l.id || ':' || (v_today - 1)) then
+          v_data := app.daily_report_data(l.id, v_today - 1);
+          v_id := app.queue_email(l.organization_id, l.id, 'daily_report', 'daily:' || l.id || ':' || (v_today - 1),
+                    format('Daily Restaurant Operations — %s', to_char(v_today - 1, 'FMMonth FMDD')), v_data);
+          v_n := v_n + (v_id is not null)::int;
+        end if;
+        -- weekly report on Monday for Mon..Sun last week
+        if extract(isodow from v_today) = 1 then
+          v_week_start := v_today - 7;
+          if not exists (select 1 from public.email_outbox where dedupe_key = 'weekly:' || l.id || ':' || v_week_start) then
+            v_data := app.period_report_data(l.id, v_week_start, v_today - 1, 'weekly');
+            v_id := app.queue_email(l.organization_id, l.id, 'weekly_report', 'weekly:' || l.id || ':' || v_week_start,
+                      format('Weekly Restaurant Inventory Report — %s–%s', to_char(v_week_start, 'Mon FMDD'),
+                             case when extract(month from v_week_start) = extract(month from v_today - 1) then to_char(v_today - 1, 'FMDD') else to_char(v_today - 1, 'Mon FMDD') end),
+                      v_data);
+            v_n := v_n + (v_id is not null)::int;
+          end if;
+        end if;
+        -- monthly owner report on the 1st for last month
+        if extract(day from v_today) = 1 and not exists (select 1 from public.email_outbox where dedupe_key = 'monthly:' || l.id || ':' || to_char(v_today - 1, 'YYYY-MM')) then
+          v_data := app.monthly_report_data(l.id, v_today - 1);
+          v_id := app.queue_email(l.organization_id, l.id, 'monthly_report', 'monthly:' || l.id || ':' || to_char(v_today - 1, 'YYYY-MM'),
+                    format('Monthly Owner Report — %s', to_char(v_today - 1, 'FMMonth YYYY')), v_data);
+          v_n := v_n + (v_id is not null)::int;
+        end if;
+        -- once-a-day stock digests
+        select jsonb_agg(jsonb_build_object('name', product_name, 'on_hand', round(on_hand, 2), 'unit', inventory_unit, 'par', effective_par, 'status', stock_status) order by product_name)
+          into v_items from public.current_inventory where location_id = l.id and active and stock_status in ('critical', 'out', 'negative');
+        if v_items is not null then
+          v_id := app.queue_email(l.organization_id, l.id, 'critical_stock', 'critical_stock:' || l.id || ':' || v_today,
+                    format('Critical stock — %s item%s', jsonb_array_length(v_items), case when jsonb_array_length(v_items) = 1 then '' else 's' end),
+                    jsonb_build_object('template', 'stock', 'level', 'critical', 'items', v_items, 'date', v_today));
+          v_n := v_n + (v_id is not null)::int;
+        end if;
+        select jsonb_agg(jsonb_build_object('name', product_name, 'on_hand', round(on_hand, 2), 'unit', inventory_unit, 'par', effective_par, 'status', stock_status) order by product_name)
+          into v_items from public.current_inventory where location_id = l.id and active and stock_status = 'low';
+        if v_items is not null then
+          v_id := app.queue_email(l.organization_id, l.id, 'low_stock', 'low_stock:' || l.id || ':' || v_today,
+                    format('Low stock — %s item%s', jsonb_array_length(v_items), case when jsonb_array_length(v_items) = 1 then '' else 's' end),
+                    jsonb_build_object('template', 'stock', 'level', 'low', 'items', v_items, 'date', v_today));
+          v_n := v_n + (v_id is not null)::int;
+        end if;
+        if exists (select 1 from public.alerts where location_id = l.id and alert_type = 'inventory_due' and status = 'open') then
+          v_id := app.queue_email(l.organization_id, l.id, 'inventory_due', 'inventory_due:' || l.id || ':' || v_today,
+                    'Inventory due', jsonb_build_object('template', 'alert', 'title', 'Weekly inventory is due',
+                    'message', 'No inventory count has been posted in the last 7 days.', 'severity', 'warning', 'link', '/counts'));
+          v_n := v_n + (v_id is not null)::int;
+        end if;
+      end if;
+      -- vendor cutoffs in the next 4 hours with nothing marked as ordered
+      for s in select w.*, v.name as vendor_name from public.vendors v
+               join public.location_vendor_settings lvs on lvs.vendor_id = v.id and lvs.location_id = l.id and lvs.active
+               cross join lateral app.vendor_order_window(l.id, v.id) w
+               where v.kind = 'distributor' and w.order_by between now() and now() + interval '4 hours'
+                 and not exists (select 1 from public.purchase_orders po where po.location_id = l.id and po.vendor_id = v.id
+                                   and po.expected_delivery_date = w.delivery_date and po.status not in ('draft', 'ready_to_submit', 'cancelled')) loop
+        v_id := app.queue_email(l.organization_id, l.id, 'vendor_order_reminder', 'order_reminder:' || l.id || ':' || s.vendor_name || ':' || s.delivery_date,
+                  format('Place %s order by %s', s.vendor_name, to_char(s.order_by at time zone l.timezone, 'FMHH12:MI AM')),
+                  jsonb_build_object('template', 'alert', 'title', format('%s order due by %s', s.vendor_name, to_char(s.order_by at time zone l.timezone, 'FMDay FMHH12:MI AM')),
+                                     'message', format('Delivery %s. Nothing is marked as ordered yet. Review the suggested order, place it on the %s website, then mark it as ordered.',
+                                                       to_char(s.delivery_date, 'FMDay, Mon FMDD'), s.vendor_name),
+                                     'severity', 'warning', 'link', '/ordering'));
+        v_n := v_n + (v_id is not null)::int;
+      end loop;
+    exception when others then
+      raise warning 'email schedule failed for location %: %', l.id, sqlerrm;
+    end;
+  end loop;
+  return jsonb_build_object('queued', v_n);
+end $$;
+
+-- Owners can generate a report now (preview / resend). Same data, new dedupe key.
+create or replace function public.generate_report_now(p_location uuid, p_kind text, p_date date default null) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare v_org uuid := app.location_org(p_location); v_local date; v_data jsonb; v_subject text; v_from date;
+begin
+  perform app.require_org_permission('settings.manage', v_org);
+  v_local := (now() at time zone (select timezone from public.locations where id = p_location))::date;
+  if p_kind = 'daily_report' then
+    v_from := coalesce(p_date, v_local - 1);
+    v_data := app.daily_report_data(p_location, v_from);
+    v_subject := format('Daily Restaurant Operations — %s', to_char(v_from, 'FMMonth FMDD'));
+  elsif p_kind = 'weekly_report' then
+    v_from := coalesce(p_date, v_local - (extract(isodow from v_local)::int - 1) - 7);   -- last Monday-start week
+    v_data := app.period_report_data(p_location, v_from, v_from + 6, 'weekly');
+    v_subject := format('Weekly Restaurant Inventory Report — %s–%s', to_char(v_from, 'Mon FMDD'), to_char(v_from + 6, 'Mon FMDD'));
+  elsif p_kind = 'monthly_report' then
+    v_from := date_trunc('month', coalesce(p_date, (date_trunc('month', v_local) - interval '1 day')::date))::date;
+    v_data := app.monthly_report_data(p_location, v_from);
+    v_subject := format('Monthly Owner Report — %s', to_char(v_from, 'FMMonth YYYY'));
+  else
+    raise exception 'Only daily, weekly and monthly reports can be generated on demand';
+  end if;
+  perform app.audit(v_org, p_location, 'generate', 'email', p_kind, 'Generated ' || v_subject, null, null);
+  return app.queue_email(v_org, p_location, p_kind, format('manual:%s:%s:%s', p_kind, p_location, gen_random_uuid()), v_subject || ' (manual)', v_data);
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Sender protocol (service role only)
+-- ---------------------------------------------------------------------
+create or replace function public.claim_email_batch(p_limit integer default 20)
+returns setof public.email_outbox
+language plpgsql security definer set search_path = public as $$
+begin
+  if not app.is_trusted_caller() then raise exception 'Server job only' using errcode = '42501'; end if;
+  -- a crashed sender leaves rows "sending": retry them after 10 minutes
+  return query
+  update public.email_outbox o set status = 'sending', attempts = o.attempts + 1, claimed_at = now()
+  where o.id in (select id from public.email_outbox
+                 where (status = 'pending' or (status = 'sending' and claimed_at < now() - interval '10 minutes'))
+                   and attempts < 5
+                 order by created_at limit p_limit for update skip locked)
+  returning o.*;
+end $$;
+
+-- p_permanent: the provider rejected it for good (bad address, unverified sender) -> failed now, no retries.
+create or replace function public.complete_email(p_id uuid, p_ok boolean, p_error text default null, p_provider_id text default null,
+                                                 p_permanent boolean default false) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not app.is_trusted_caller() then raise exception 'Server job only' using errcode = '42501'; end if;
+  update public.email_outbox set
+    status = case when p_ok then 'sent' when p_permanent or attempts >= 5 then 'failed' else 'pending' end,
+    sent_at = case when p_ok then now() end, last_error = p_error, provider_id = coalesce(p_provider_id, provider_id)
+  where id = p_id and status = 'sending';
+end $$;
+
+-- Owners can retry a failed email.
+create or replace function public.retry_email(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v public.email_outbox;
+begin
+  select * into v from public.email_outbox where id = p_id;
+  if v.id is null then raise exception 'Email not found'; end if;
+  perform app.require_org_permission('settings.manage', v.organization_id);
+  if v.status not in ('failed', 'skipped') then raise exception 'Only failed or skipped emails can be retried'; end if;
+  update public.email_outbox set status = 'pending', attempts = 0, last_error = null,
+    recipients = case when cardinality(recipients) = 0 then
+      coalesce((select array_agg(distinct r.email) from public.email_recipients r join public.email_subscriptions s on s.recipient_id = r.id and s.kind = v.kind
+                where r.organization_id = v.organization_id and r.active and (r.location_id is null or r.location_id = v.location_id)), '{}')
+      else recipients end
+  where id = p_id;
+  perform app.audit(v.organization_id, v.location_id, 'retry', 'email', p_id::text, 'Retry: ' || v.subject, null, null);
+end $$;
+
+insert into app.private_functions values ('public.claim_email_batch(integer)'), ('public.complete_email(uuid,boolean,text,text,boolean)'), ('public.run_email_schedule()')
+on conflict do nothing;
+
+select app.apply_grants();
+grant execute on function public.claim_email_batch(integer), public.complete_email(uuid, boolean, text, text, boolean), public.run_email_schedule() to service_role;
+
+-- ============================================================================
+-- 20260930002700_food_cost_rounding.sql
+-- ============================================================================
+-- =====================================================================
+-- Food cost reconciles to the cent: each component is rounded first and
+-- actual cost = begin + purchases + transfers - end of the ROUNDED values
+-- (previously the unrounded total could differ from the printed parts by $0.01).
+-- Same logic otherwise; access now also allows the server's report job.
+-- =====================================================================
+
+create or replace function public.food_cost_summary(p_location uuid, p_from timestamptz, p_to timestamptz, p_cost_groups text[] default array['food'])
+returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare
+  v jsonb;
+begin
+  perform app.require_location_access(p_location);
+  with prods as (
+    select p.id from public.products p left join public.categories c on c.id = p.category_id
+    where p.organization_id = app.location_org(p_location) and coalesce(c.cost_group, 'food') = any(p_cost_groups)
+  ),
+  t as (
+    select t.* from public.inventory_transactions t join prods on prods.id = t.product_id
+    where t.location_id = p_location
+  ),
+  agg_raw as (
+    select
+      coalesce(sum(extended_cost) filter (where txn_at <= p_from), 0) as begin_value,
+      coalesce(sum(extended_cost) filter (where txn_at <= p_to), 0) as end_value,
+      coalesce(sum(extended_cost) filter (where txn_at > p_from and txn_at <= p_to and txn_type in ('RECEIPT', 'RETURN_TO_VENDOR')), 0) as purchases,
+      coalesce(sum(extended_cost) filter (where txn_at > p_from and txn_at <= p_to and txn_type in ('TRANSFER_IN', 'TRANSFER_OUT')), 0) as transfers,
+      coalesce(-sum(extended_cost) filter (where txn_at > p_from and txn_at <= p_to and txn_type = 'POS_CONSUMPTION'), 0) as pos_usage,
+      coalesce(-sum(extended_cost) filter (where txn_at > p_from and txn_at <= p_to and txn_type = 'WASTE'), 0) as waste,
+      coalesce(-sum(extended_cost) filter (where txn_at > p_from and txn_at <= p_to and txn_type = 'PHYSICAL_VARIANCE'), 0) as count_variance,
+      coalesce(-sum(extended_cost) filter (where txn_at > p_from and txn_at <= p_to and txn_type in ('MANUAL_ADJUSTMENT', 'CORRECTION')), 0) as adjustments,
+      coalesce(-sum(extended_cost) filter (where txn_at > p_from and txn_at <= p_to and txn_type in ('RECIPE_CONSUMPTION', 'PRODUCTION')), 0) as production_net
+    from t
+  ),
+  -- Round each component to cents first, then derive actual cost from the
+  -- rounded figures so the printed report always adds up exactly.
+  agg as (
+    select round(begin_value, 2) as begin_value, round(end_value, 2) as end_value, round(purchases, 2) as purchases,
+           round(transfers, 2) as transfers, round(pos_usage, 2) as pos_usage, round(waste, 2) as waste,
+           round(count_variance, 2) as count_variance, round(adjustments, 2) as adjustments, round(production_net, 2) as production_net
+    from agg_raw
+  ),
+  sales as (
+    select coalesce(sum(s.net_sales), 0) as net_sales, coalesce(sum(s.guest_count), 0) as guests, coalesce(sum(s.check_count), 0) as checks,
+           count(*) as days
+    from public.sales_imports s
+    where s.location_id = p_location and s.status = 'posted'
+      and (s.business_date::timestamp + time '12:00') at time zone (select timezone from public.locations where id = p_location) > p_from
+      and (s.business_date::timestamp + time '12:00') at time zone (select timezone from public.locations where id = p_location) <= p_to
+  ),
+  theo as (  -- menu items sold x CURRENT recipe cost (limited to the requested cost groups)
+    select coalesce(sum(sl.quantity * mi.portion_qty * (
+             select coalesce(sum(c.base_qty * app.current_unit_cost(p_location, c.product_id)), 0)
+             from app.recipe_components(mi.recipe_id, 1, false) c join prods on prods.id = c.product_id)), 0) as theoretical
+    from public.sales_imports s
+    join public.sales_lines sl on sl.import_id = s.id
+    join public.menu_items mi on mi.id = sl.menu_item_id and mi.recipe_id is not null
+    where s.location_id = p_location and s.status = 'posted'
+      and (s.business_date::timestamp + time '12:00') at time zone (select timezone from public.locations where id = p_location) > p_from
+      and (s.business_date::timestamp + time '12:00') at time zone (select timezone from public.locations where id = p_location) <= p_to
+  )
+  select jsonb_build_object(
+    'from', p_from, 'to', p_to, 'cost_groups', p_cost_groups,
+    'net_sales', s.net_sales, 'guests', s.guests, 'checks', s.checks, 'sales_days', s.days,
+    'begin_inventory', round(a.begin_value, 2), 'purchases', round(a.purchases, 2), 'transfers', round(a.transfers, 2),
+    'end_inventory', round(a.end_value, 2),
+    'actual_cost', round(a.begin_value + a.purchases + a.transfers - a.end_value, 2),
+    'theoretical_cost', round(th.theoretical, 2),
+    'pos_usage_at_post', round(a.pos_usage, 2),
+    'waste', round(a.waste, 2), 'count_variance', round(a.count_variance, 2), 'adjustments', round(a.adjustments, 2),
+    'production_net', round(a.production_net, 2),
+    'variance', round(a.begin_value + a.purchases + a.transfers - a.end_value - round(th.theoretical, 2), 2),
+    'actual_pct', case when s.net_sales > 0 then round((a.begin_value + a.purchases + a.transfers - a.end_value) / s.net_sales * 100, 2) end,
+    'theoretical_pct', case when s.net_sales > 0 then round(round(th.theoretical, 2) / s.net_sales * 100, 2) end,
+    'waste_pct', case when s.net_sales > 0 then round(a.waste / s.net_sales * 100, 2) end
+  ) into v
+  from agg a, sales s, theo th;
+  return v || jsonb_build_object('variance_pct_points',
+    case when (v ->> 'actual_pct') is not null then round((v ->> 'actual_pct')::numeric - (v ->> 'theoretical_pct')::numeric, 2) end);
+end $$;
+
+
+select app.apply_grants();
+
+-- ============================================================================
+-- 20260930002750_alert_sync_failure.sql
+-- ============================================================================
+-- Own migration: a new enum value cannot be used in the transaction that adds it.
+alter type public.alert_type add value if not exists 'sync_failure';
+
+-- ============================================================================
+-- 20260930002800_toast_orders.sql
+-- ============================================================================
+-- =====================================================================
+-- TOAST ORDER SYNC (order-level, idempotent)
+--
+-- Orders arrive from a Toast webhook, an API pull or a manual upload, already
+-- normalized by the app's Toast adapter (src/lib/pos/toast-orders.ts) into:
+--   {guid, business_date, modified_at (ms), voided, deleted, guest_count,
+--    selections: [{guid, item_guid, name, quantity, net_sales, voided, refunded_quantity}]}
+-- Rules:
+--   * One row per Toast order GUID per store. An event older than (or the same
+--     as) what was already applied changes nothing -> repeats never double count.
+--   * Each order remembers the ingredient usage it has posted. Creates, updates,
+--     voids, refunds, removed items and quantity changes post only the difference.
+--   * Items not mapped to a recipe deplete nothing until management maps them;
+--     mapping reprocesses the affected orders.
+--   * A per-day sales_imports row (source 'toast_api') is rebuilt from the orders
+--     so dashboards, forecasts and food cost read Toast sales the same way as
+--     file imports. A day is either file-imported or API-synced, never both.
+-- =====================================================================
+
+create table public.toast_orders (
+  id              uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id),
+  location_id     uuid not null references public.locations(id),
+  toast_guid      text not null,
+  business_date   date not null,
+  modified_at     bigint not null,               -- Toast modifiedDate (epoch ms): the order's version
+  voided          boolean not null default false,
+  deleted         boolean not null default false,
+  guest_count     integer not null default 0,
+  net_sales       numeric(14,2) not null default 0,
+  unmapped_items  integer not null default 0,
+  payload_hash    text not null,
+  first_seen_at   timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  unique (location_id, toast_guid)
+);
+create index on public.toast_orders (location_id, business_date);
+
+create table public.toast_order_items (
+  id                uuid primary key default gen_random_uuid(),
+  order_id          uuid not null references public.toast_orders(id) on delete cascade,
+  selection_guid    text not null,
+  item_guid         text,
+  item_name         text not null,
+  quantity          numeric(12,4) not null default 0,
+  refunded_quantity numeric(12,4) not null default 0,
+  net_sales         numeric(14,2) not null default 0,
+  voided            boolean not null default false,
+  menu_item_id      uuid references public.menu_items(id),
+  unique (order_id, selection_guid)
+);
+
+-- What each order has already taken out of inventory (base units).
+create table public.toast_order_usage (
+  order_id   uuid not null references public.toast_orders(id) on delete cascade,
+  product_id uuid not null references public.products(id),
+  base_qty   numeric(18,4) not null,
+  primary key (order_id, product_id)
+);
+
+create table public.toast_sync_log (
+  id              bigint generated always as identity primary key,
+  organization_id uuid references public.organizations(id),
+  location_id     uuid references public.locations(id),
+  source          text not null check (source in ('webhook', 'api', 'manual', 'reprocess', 'demo')),
+  toast_guid      text,
+  business_date   date,
+  status          text not null check (status in ('applied', 'unchanged', 'stale', 'held', 'error')),
+  message         text,
+  created_at      timestamptz not null default now()
+);
+create index on public.toast_sync_log (location_id, created_at desc);
+create trigger trg_toast_sync_log_immutable before update or delete on public.toast_sync_log for each row execute function app.prevent_mutation();
+
+insert into app.write_protected_tables values ('toast_orders'), ('toast_order_items'), ('toast_order_usage'), ('toast_sync_log');
+alter table public.toast_orders enable row level security;
+alter table public.toast_order_items enable row level security;
+alter table public.toast_order_usage enable row level security;
+alter table public.toast_sync_log enable row level security;
+create policy toast_orders_select on public.toast_orders for select to authenticated
+  using (location_id in (select app.user_location_ids()) and (app.has_permission('sales.import', location_id) or app.has_permission('reports.view_cost', location_id)));
+create policy toast_items_select on public.toast_order_items for select to authenticated using (order_id in (select id from public.toast_orders));
+create policy toast_usage_select on public.toast_order_usage for select to authenticated using (order_id in (select id from public.toast_orders));
+create policy toast_log_select on public.toast_sync_log for select to authenticated
+  using (location_id in (select app.user_location_ids()) and app.has_permission('sales.import', location_id));
+
+-- The API-synced daily row can only change through the order sync.
+create or replace function app.sales_imports_toast_guard() returns trigger
+language plpgsql as $$
+begin
+  if old.source = 'toast_api' and new.status = 'reversed' then
+    raise exception 'Toast-synced sales cannot be reversed here. Void or refund the order in Toast; the change syncs automatically.';
+  end if;
+  return new;
+end $$;
+create trigger trg_sales_imports_toast_guard before update on public.sales_imports for each row execute function app.sales_imports_toast_guard();
+
+-- Toast restaurant GUID -> store (set on the Toast integration screen).
+create unique index if not exists pos_integrations_external_uniq on public.pos_integrations (provider, external_location_id) where external_location_id is not null;
+
+create or replace function public.set_toast_restaurant(p_location uuid, p_restaurant_guid text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform app.require_permission('settings.manage', p_location);
+  if p_restaurant_guid is not null and p_restaurant_guid !~* '^[0-9a-f-]{36}$' then raise exception 'That is not a Toast restaurant GUID'; end if;
+  insert into public.pos_integrations (organization_id, location_id, provider, external_location_id, active)
+  values (app.location_org(p_location), p_location, 'toast', nullif(btrim(p_restaurant_guid), ''), true)
+  on conflict (location_id, provider) do update set external_location_id = excluded.external_location_id, active = true;
+  perform app.audit(app.location_org(p_location), p_location, 'update', 'pos_integration', 'toast', 'Toast restaurant GUID set', null,
+                    jsonb_build_object('restaurant_guid', p_restaurant_guid));
+end $$;
+
+create or replace function public.toast_location_for(p_restaurant_guid text) returns uuid
+language sql stable security definer set search_path = public as $$
+  select location_id from public.pos_integrations where provider = 'toast' and active and lower(external_location_id) = lower(p_restaurant_guid)
+$$;
+
+-- ---------------------------------------------------------------------
+-- Re-derive one order's usage and post the difference.
+-- ---------------------------------------------------------------------
+create or replace function app.apply_toast_order_usage(p_order uuid) returns integer
+language plpgsql security definer set search_path = public as $$
+declare
+  o public.toast_orders; v_at timestamptz; v_tz text; c record; v_posted int := 0; v_late boolean;
+begin
+  select * into o from public.toast_orders where id = p_order for update;
+  select timezone into v_tz from public.locations where id = o.location_id;
+  v_at := (o.business_date::timestamp + time '12:00') at time zone v_tz;
+  -- never rewrite history behind a posted count: late changes are booked now
+  v_late := exists (select 1 from public.count_sessions where location_id = o.location_id and status = 'posted' and count_at >= v_at);
+  if v_late then v_at := now(); end if;
+
+  if to_regclass('pg_temp.tmp_toast_usage') is null then
+    create temporary table tmp_toast_usage (product_id uuid, base_qty numeric) on commit drop;
+  end if;
+  truncate tmp_toast_usage;
+  if not o.voided and not o.deleted then
+    insert into tmp_toast_usage
+    select rc.product_id, rc.base_qty
+    from public.toast_order_items i
+    join public.menu_items mi on mi.id = i.menu_item_id and mi.recipe_id is not null
+    cross join lateral app.recipe_components(mi.recipe_id, mi.portion_qty * (i.quantity - i.refunded_quantity), true) rc
+    where i.order_id = p_order and not i.voided and i.quantity - i.refunded_quantity > 0;
+  end if;
+
+  for c in
+    select coalesce(w.product_id, u.product_id) as product_id, coalesce(w.q, 0) as want, coalesce(u.base_qty, 0) as have
+    from (select product_id, round(sum(base_qty), 4) as q from tmp_toast_usage group by product_id) w
+    full join (select product_id, base_qty from public.toast_order_usage where order_id = p_order) u on u.product_id = w.product_id
+  loop
+    continue when c.want = c.have;
+    perform app.post_inventory_txn(o.location_id, c.product_id, 'POS_CONSUMPTION', -(c.want - c.have), app.current_unit_cost(o.location_id, c.product_id),
+      v_at, 'toast_order', p_order, null, null, case when c.have = 0 then null else 'TOAST_UPDATE' end, 'Toast ' || o.business_date,
+      case when v_late then 'Late Toast change after a posted count' end);
+    v_posted := v_posted + 1;
+    if c.want = 0 then
+      delete from public.toast_order_usage where order_id = p_order and product_id = c.product_id;
+    else
+      insert into public.toast_order_usage (order_id, product_id, base_qty) values (p_order, c.product_id, c.want)
+      on conflict (order_id, product_id) do update set base_qty = excluded.base_qty;
+    end if;
+  end loop;
+  return v_posted;
+end $$;
+
+-- Rebuild the day's sales row (sales, guests, items, theoretical cost) from the orders.
+create or replace function app.rebuild_toast_day(p_location uuid, p_date date) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare v_id uuid; v_org uuid := app.location_org(p_location);
+begin
+  select id into v_id from public.sales_imports where location_id = p_location and business_date = p_date and status = 'posted' and source = 'toast_api';
+  if v_id is null then
+    insert into public.sales_imports (organization_id, location_id, business_date, source, file_name, imported_by)
+    values (v_org, p_location, p_date, 'toast_api', 'Toast order sync', auth.uid()) returning id into v_id;
+  end if;
+  delete from public.sales_lines where import_id = v_id;
+  insert into public.sales_lines (import_id, menu_item_id, pos_item_id, item_name, quantity, net_sales, voids, refunds, recipe_cost)
+  select v_id, i.menu_item_id, i.item_guid, min(i.item_name),
+         sum(case when i.voided or o.voided or o.deleted then 0 else i.quantity - i.refunded_quantity end),
+         sum(case when i.voided or o.voided or o.deleted then 0 else i.net_sales end),
+         sum(case when i.voided or o.voided or o.deleted then i.quantity else 0 end),
+         sum(case when i.voided or o.voided or o.deleted then 0 else i.refunded_quantity end),
+         (select public.recipe_unit_cost(mi.recipe_id, p_location) * mi.portion_qty from public.menu_items mi where mi.id = i.menu_item_id and mi.recipe_id is not null)
+  from public.toast_order_items i join public.toast_orders o on o.id = i.order_id
+  where o.location_id = p_location and o.business_date = p_date
+  group by i.menu_item_id, i.item_guid;
+  update public.sales_imports s set
+    net_sales = coalesce((select sum(net_sales) from public.toast_orders where location_id = p_location and business_date = p_date and not voided and not deleted), 0),
+    gross_sales = coalesce((select sum(net_sales) from public.toast_orders where location_id = p_location and business_date = p_date and not voided and not deleted), 0),
+    guest_count = coalesce((select sum(guest_count) from public.toast_orders where location_id = p_location and business_date = p_date and not voided and not deleted), 0),
+    check_count = (select count(*) from public.toast_orders where location_id = p_location and business_date = p_date and not voided and not deleted),
+    voids = coalesce((select sum(net_sales) from public.toast_orders where location_id = p_location and business_date = p_date and (voided or deleted)), 0),
+    refunds = coalesce((select sum(i.refunded_quantity) from public.toast_order_items i join public.toast_orders o on o.id = i.order_id
+                        where o.location_id = p_location and o.business_date = p_date), 0),
+    unmapped_lines = (select count(*) from public.sales_lines where import_id = v_id and menu_item_id is null and quantity > 0),
+    theoretical_cost = coalesce((select round(sum(quantity * coalesce(recipe_cost, 0)), 4) from public.sales_lines where import_id = v_id), 0)
+  where s.id = v_id;
+  return v_id;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Ingest one normalized order. Callable by the server (webhook/API job) or by a
+-- manager with sales.import (manual upload). Always returns; problems are logged.
+-- ---------------------------------------------------------------------
+create or replace function public.ingest_toast_order(p_location uuid, p_order jsonb, p_source text default 'manual') returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  v_org uuid := app.location_org(p_location);
+  v_guid text := nullif(btrim(p_order ->> 'guid'), '');
+  v_date date; v_version bigint; v_hash text; o public.toast_orders; s jsonb; v_mi uuid; v_unmapped int := 0; v_posted int;
+begin
+  -- authorization failures are raised to the caller, never swallowed into the log
+  if not app.is_trusted_caller() then perform app.require_permission('sales.import', p_location); end if;
+  if v_org is null then raise exception 'Location not found'; end if;
+  if v_guid is null then raise exception 'Toast order has no guid'; end if;
+  begin  -- everything below is all-or-nothing; a failure is logged and alerted
+  begin
+    v_date := (p_order ->> 'business_date')::date;
+    v_version := (p_order ->> 'modified_at')::bigint;
+  exception when others then
+    insert into public.toast_sync_log (organization_id, location_id, source, toast_guid, status, message)
+    values (v_org, p_location, p_source, v_guid, 'error', 'Missing or invalid business_date / modified_at');
+    return jsonb_build_object('status', 'error', 'message', 'Missing or invalid business_date / modified_at');
+  end;
+  if v_date is null or v_version is null then
+    insert into public.toast_sync_log (organization_id, location_id, source, toast_guid, status, message)
+    values (v_org, p_location, p_source, v_guid, 'error', 'Missing business_date or modified_at');
+    return jsonb_build_object('status', 'error', 'message', 'Missing business_date or modified_at');
+  end if;
+  v_hash := md5((p_order - 'received_at')::text);
+
+  -- A day imported from a file is not also synced (that would double count).
+  if exists (select 1 from public.sales_imports where location_id = p_location and business_date = v_date and status = 'posted' and source <> 'toast_api') then
+    insert into public.toast_sync_log (organization_id, location_id, source, toast_guid, business_date, status, message)
+    values (v_org, p_location, p_source, v_guid, v_date, 'held',
+            format('Sales for %s were already imported from a file. Reverse that import to let Toast sync this day.', v_date));
+    perform app.raise_alert(p_location, 'sync_failure', 'warning', 'Toast orders held for ' || to_char(v_date, 'Mon DD'),
+      'That day was already imported from a file, so synced orders are held to avoid counting sales twice.', 'toast_held:' || v_date);
+    return jsonb_build_object('status', 'held');
+  end if;
+
+  -- serialize concurrent events for the same order
+  perform pg_advisory_xact_lock(hashtextextended(p_location::text || v_guid, 0));
+  select * into o from public.toast_orders where location_id = p_location and toast_guid = v_guid for update;
+  if o.id is not null and (o.modified_at > v_version or (o.modified_at = v_version and o.payload_hash = v_hash)) then
+    insert into public.toast_sync_log (organization_id, location_id, source, toast_guid, business_date, status, message)
+    values (v_org, p_location, p_source, v_guid, v_date, case when o.modified_at > v_version then 'stale' else 'unchanged' end,
+            case when o.modified_at > v_version then 'Older than the version already applied' else 'Already applied' end);
+    return jsonb_build_object('status', case when o.modified_at > v_version then 'stale' else 'unchanged' end, 'order_id', o.id);
+  end if;
+  if o.id is not null and o.business_date <> v_date then
+    insert into public.toast_sync_log (organization_id, location_id, source, toast_guid, business_date, status, message)
+    values (v_org, p_location, p_source, v_guid, v_date, 'error', 'Business date changed in Toast; review manually');
+    return jsonb_build_object('status', 'error', 'message', 'Business date changed');
+  end if;
+
+  if o.id is null then
+    insert into public.toast_orders (organization_id, location_id, toast_guid, business_date, modified_at, payload_hash)
+    values (v_org, p_location, v_guid, v_date, v_version, v_hash) returning * into o;
+  end if;
+  delete from public.toast_order_items where order_id = o.id;
+  for s in select * from jsonb_array_elements(coalesce(p_order -> 'selections', '[]'::jsonb)) loop
+    continue when nullif(s ->> 'guid', '') is null;
+    select mi.id into v_mi from public.menu_items mi
+     where mi.organization_id = v_org and mi.active
+       and ((nullif(s ->> 'item_guid', '') is not null and mi.pos_item_id = s ->> 'item_guid') or lower(mi.name) = lower(btrim(s ->> 'name')))
+     order by (mi.pos_item_id = s ->> 'item_guid') desc nulls last limit 1;
+    insert into public.toast_order_items (order_id, selection_guid, item_guid, item_name, quantity, refunded_quantity, net_sales, voided, menu_item_id)
+    values (o.id, s ->> 'guid', nullif(s ->> 'item_guid', ''), coalesce(nullif(btrim(s ->> 'name'), ''), s ->> 'item_guid', 'Unknown item'),
+            greatest(coalesce((s ->> 'quantity')::numeric, 0), 0), greatest(coalesce((s ->> 'refunded_quantity')::numeric, 0), 0),
+            coalesce((s ->> 'net_sales')::numeric, 0), coalesce((s ->> 'voided')::boolean, false), v_mi)
+    on conflict (order_id, selection_guid) do nothing;
+    if v_mi is null or not exists (select 1 from public.menu_items where id = v_mi and recipe_id is not null) then
+      v_unmapped := v_unmapped + case when coalesce((s ->> 'voided')::boolean, false) then 0 else 1 end;
+    end if;
+  end loop;
+  update public.toast_orders set modified_at = v_version, payload_hash = v_hash,
+    voided = coalesce((p_order ->> 'voided')::boolean, false), deleted = coalesce((p_order ->> 'deleted')::boolean, false),
+    guest_count = greatest(coalesce((p_order ->> 'guest_count')::int, 0), 0),
+    net_sales = coalesce((select sum(net_sales) from public.toast_order_items where order_id = o.id and not voided), 0),
+    unmapped_items = v_unmapped, updated_at = now()
+  where id = o.id;
+
+  v_posted := app.apply_toast_order_usage(o.id);
+  perform app.rebuild_toast_day(p_location, v_date);
+  if v_unmapped > 0 then
+    perform app.create_task(p_location, 'Map Toast menu items to recipes', 'custom', now() + interval '1 day',
+      'Unmapped Toast items do not deplete inventory until they are mapped (Sales / Toast).', null, null, 'toast_unmapped');
+  end if;
+  insert into public.toast_sync_log (organization_id, location_id, source, toast_guid, business_date, status, message)
+  values (v_org, p_location, p_source, v_guid, v_date, 'applied',
+          format('%s ingredient movement(s)%s%s', v_posted, case when v_unmapped > 0 then format(', %s unmapped item(s)', v_unmapped) else '' end,
+                 case when coalesce((p_order ->> 'voided')::boolean, false) or coalesce((p_order ->> 'deleted')::boolean, false) then ', order voided' else '' end));
+  return jsonb_build_object('status', 'applied', 'order_id', o.id, 'movements', v_posted, 'unmapped', v_unmapped);
+  exception when others then
+    -- the order's changes are rolled back by this block; record why and alert
+    insert into public.toast_sync_log (organization_id, location_id, source, toast_guid, status, message)
+    values (v_org, p_location, p_source, v_guid, 'error', left(sqlerrm, 500));
+    perform app.raise_alert(p_location, 'sync_failure', 'critical', 'Toast sync error',
+      'An order could not be processed: ' || left(sqlerrm, 200), 'toast_error:' || v_guid);
+    return jsonb_build_object('status', 'error', 'message', sqlerrm);
+  end;
+end $$;
+
+-- After mapping a menu item, re-derive usage for the store's orders that contain it.
+create or replace function public.reprocess_toast_orders(p_location uuid, p_since date default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare o record; v_n int := 0; v_m int := 0; d date;
+begin
+  if not app.is_trusted_caller() then perform app.require_permission('sales.import', p_location); end if;
+  for o in select t.id, t.business_date from public.toast_orders t where t.location_id = p_location
+             and t.business_date >= coalesce(p_since, current_date - 60) and t.unmapped_items > 0 loop
+    update public.toast_order_items i set menu_item_id = (
+      select mi.id from public.menu_items mi where mi.organization_id = app.location_org(p_location) and mi.active
+        and ((i.item_guid is not null and mi.pos_item_id = i.item_guid) or lower(mi.name) = lower(i.item_name))
+      order by (mi.pos_item_id = i.item_guid) desc nulls last limit 1)
+    where i.order_id = o.id;
+    update public.toast_orders t set unmapped_items = (select count(*) from public.toast_order_items i left join public.menu_items mi on mi.id = i.menu_item_id
+                                                        where i.order_id = t.id and not i.voided and mi.recipe_id is null)
+    where t.id = o.id;
+    v_m := v_m + app.apply_toast_order_usage(o.id);
+    v_n := v_n + 1;
+  end loop;
+  for d in select distinct business_date from public.toast_orders where location_id = p_location and business_date >= coalesce(p_since, current_date - 60) loop
+    perform app.rebuild_toast_day(p_location, d);
+  end loop;
+  if v_n > 0 then
+    insert into public.toast_sync_log (organization_id, location_id, source, status, message)
+    values (app.location_org(p_location), p_location, 'reprocess', 'applied', format('%s order(s) reprocessed after mapping, %s ingredient movement(s)', v_n, v_m));
+  end if;
+  return jsonb_build_object('orders', v_n, 'movements', v_m);
+end $$;
+
+-- Sync health for the integration screen.
+create or replace function public.toast_sync_status(p_location uuid) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'restaurant_guid', (select external_location_id from public.pos_integrations where location_id = p_location and provider = 'toast'),
+    'last_event_at', (select max(created_at) from public.toast_sync_log where location_id = p_location),
+    'last_applied_at', (select max(created_at) from public.toast_sync_log where location_id = p_location and status = 'applied'),
+    'orders_today', (select count(*) from public.toast_orders where location_id = p_location
+                       and business_date = (now() at time zone (select timezone from public.locations where id = p_location))::date),
+    'errors_24h', (select count(*) from public.toast_sync_log where location_id = p_location and status in ('error', 'held') and created_at > now() - interval '24 hours'),
+    'unmapped', (select coalesce(jsonb_agg(x order by x.qty desc), '[]'::jsonb) from (
+        select i.item_guid, i.item_name, sum(i.quantity) as qty from public.toast_order_items i join public.toast_orders o on o.id = i.order_id
+        left join public.menu_items mi on mi.id = i.menu_item_id
+        where o.location_id = p_location and not i.voided and mi.recipe_id is null and o.business_date >= current_date - 60
+        group by i.item_guid, i.item_name) x))
+  where p_location in (select app.user_location_ids()) and app.has_permission('sales.import', p_location)
+$$;
+
+-- Toast failures email the owners who asked for them. (Compared as text: the
+-- sync_failure enum value may be new in this same transaction.)
+create or replace function app.alert_email_kind(p_type public.alert_type) returns text
+language sql immutable as $$
+  select case p_type::text
+    when 'high_waste' then 'waste_alert'
+    when 'high_variance' then 'variance_alert'
+    when 'short_delivery' then 'delivery_discrepancy'
+    when 'invoice_difference' then 'delivery_discrepancy'
+    when 'temperature_failure' then 'delivery_discrepancy'
+    when 'price_increase' then 'price_alert'
+    when 'sync_failure' then 'sync_failure'
+  end
+$$;
+
+select app.apply_grants();
+
 notify pgrst, 'reload schema';
