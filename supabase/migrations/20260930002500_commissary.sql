@@ -95,6 +95,29 @@ language sql stable security definer set search_path = public as $$
   order by i.sort, p.name
 $$;
 
+-- Orders with both location names: a restaurant cannot read the commissary's
+-- location row (and vice versa), but both parties need to see who is who.
+create or replace function public.list_commissary_orders(p_location uuid)
+returns table (id uuid, order_number text, status public.commissary_order_status, needed_date date, location_id uuid, commissary_location_id uuid,
+               discrepancy_value numeric, restaurant_code text, restaurant_name text, commissary_code text, commissary_name text)
+language sql stable security definer set search_path = public as $$
+  select o.id, o.order_number, o.status, o.needed_date, o.location_id, o.commissary_location_id, o.discrepancy_value,
+         r.code, r.name, c.code, c.name
+  from public.commissary_orders o join public.locations r on r.id = o.location_id join public.locations c on c.id = o.commissary_location_id
+  where p_location in (select app.user_location_ids()) and (o.location_id = p_location or o.commissary_location_id = p_location)
+  order by o.needed_date desc, o.order_number desc
+  limit 300
+$$;
+
+create or replace function public.get_commissary_order(p_order uuid) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select to_jsonb(o) || jsonb_build_object(
+           'restaurant', jsonb_build_object('code', r.code, 'name', r.name, 'timezone', r.timezone),
+           'commissary', jsonb_build_object('code', c.code, 'name', c.name))
+  from public.commissary_orders o join public.locations r on r.id = o.location_id join public.locations c on c.id = o.commissary_location_id
+  where o.id = p_order and (o.location_id in (select app.user_location_ids()) or o.commissary_location_id in (select app.user_location_ids()))
+$$;
+
 -- ---------------------------------------------------------------------
 -- Create / edit (draft only)
 -- p_lines: [{product_id, unit_id, qty, notes}]

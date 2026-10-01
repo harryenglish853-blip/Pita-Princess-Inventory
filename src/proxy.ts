@@ -1,7 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/signup", "/offline", "/auth"];
+// /api/cron and /api/toast authenticate themselves (shared secret / webhook signature).
+const PUBLIC_PATHS = ["/login", "/signup", "/offline", "/auth", "/forgot", "/api/cron/", "/api/toast/"];
 
 /** Refreshes the Supabase session cookie and guards authenticated routes. */
 export async function proxy(request: NextRequest) {

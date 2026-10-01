@@ -520,12 +520,14 @@ begin
   returning o.*;
 end $$;
 
-create or replace function public.complete_email(p_id uuid, p_ok boolean, p_error text default null, p_provider_id text default null) returns void
+-- p_permanent: the provider rejected it for good (bad address, unverified sender) -> failed now, no retries.
+create or replace function public.complete_email(p_id uuid, p_ok boolean, p_error text default null, p_provider_id text default null,
+                                                 p_permanent boolean default false) returns void
 language plpgsql security definer set search_path = public as $$
 begin
   if not app.is_trusted_caller() then raise exception 'Server job only' using errcode = '42501'; end if;
   update public.email_outbox set
-    status = case when p_ok then 'sent' when attempts >= 5 then 'failed' else 'pending' end,
+    status = case when p_ok then 'sent' when p_permanent or attempts >= 5 then 'failed' else 'pending' end,
     sent_at = case when p_ok then now() end, last_error = p_error, provider_id = coalesce(p_provider_id, provider_id)
   where id = p_id and status = 'sending';
 end $$;
@@ -548,8 +550,8 @@ begin
   perform app.audit(v.organization_id, v.location_id, 'retry', 'email', p_id::text, 'Retry: ' || v.subject, null, null);
 end $$;
 
-insert into app.private_functions values ('public.claim_email_batch(integer)'), ('public.complete_email(uuid,boolean,text,text)'), ('public.run_email_schedule()')
+insert into app.private_functions values ('public.claim_email_batch(integer)'), ('public.complete_email(uuid,boolean,text,text,boolean)'), ('public.run_email_schedule()')
 on conflict do nothing;
 
 select app.apply_grants();
-grant execute on function public.claim_email_batch(integer), public.complete_email(uuid, boolean, text, text), public.run_email_schedule() to service_role;
+grant execute on function public.claim_email_batch(integer), public.complete_email(uuid, boolean, text, text, boolean), public.run_email_schedule() to service_role;

@@ -16,14 +16,19 @@ export default async function ReceivingPage({ searchParams }: { searchParams: Pr
   const ordering = orderingEnabled(ctx);
   const supabase = await createClient();
   const today = todayIn(ctx.location.timezone);
-  const [{ data: expected }, { data: receipts }, { data: vendors }] = await Promise.all([
+  const [{ data: expected }, { data: receipts }, { data: vendorRows }, { data: internal }, { data: arriving }] = await Promise.all([
     supabase.from("purchase_orders").select("id, po_number, status, expected_delivery_date, vendor:vendors(name)").eq("location_id", ctx.location.id)
       .in("status", ["submitted", "confirmed", "back_ordered", "partially_received"]).order("expected_delivery_date"),
     supabase.from("receipts").select("id, receipt_number, status, invoice_number, invoice_total, delivery_date, received_at, posted_at, purchase_order_id, vendor:vendors(name), po:purchase_orders(po_number)")
       .eq("location_id", ctx.location.id).order("created_at", { ascending: false }).limit(300),
     // Vendors this store buys from (store settings can switch a vendor off)
     supabase.from("location_vendor_settings").select("id:vendor_id, name:vendor_name").eq("location_id", ctx.location.id).eq("active", true).order("vendor_name"),
+    // The commissary is received through its own orders (no invoice), not here
+    supabase.from("vendors").select("id").eq("kind", "commissary"),
+    supabase.from("commissary_orders").select("id, order_number, needed_date").eq("location_id", ctx.location.id).eq("status", "in_transit").order("needed_date"),
   ]);
+  const internalIds = new Set((internal ?? []).map((v) => v.id));
+  const vendors = (vendorRows ?? []).filter((v) => !internalIds.has(v.id));
   const inProgress = (receipts ?? []).filter((r) => ["draft", "received"].includes(r.status));
   const openByPo = new Map(inProgress.filter((r) => r.purchase_order_id).map((r) => [r.purchase_order_id!, r.id]));
   const history = (receipts ?? []).map((r) => ({ ...r, vendor_name: (r.vendor as unknown as { name: string }).name, po_number: (r.po as unknown as { po_number: string } | null)?.po_number ?? "—" }));
@@ -32,6 +37,15 @@ export default async function ReceivingPage({ searchParams }: { searchParams: Pr
       <PageHeader title="Receiving"
         subtitle={ordering ? "Receive deliveries, check them against the order and invoice, then reconcile" : "Record each delivery from its invoice: what arrived, what it cost. Stock and costs update when it's posted."}
         actions={<NewReceiptButton vendors={vendors ?? []} label={ordering ? "Receive without PO" : "Log a delivery"} primary={!ordering} openFor={sp.log} />} />
+      {arriving?.length ? (
+        <Card title="Commissary deliveries arriving" className="mb-4 border-brand" padded={false}>
+          <ul className="divide-y divide-border">{arriving.map((o) => (
+            <li key={o.id} className="flex items-center justify-between gap-3 px-4 py-3">
+              <div><div className="font-medium">Commissary · {o.order_number}</div><div className="text-xs text-muted">Needed {dateFmt(o.needed_date)} · IN TRANSIT</div></div>
+              <Link href={`/commissary/${o.id}`} className="text-sm font-medium text-brand">Receive →</Link>
+            </li>))}</ul>
+        </Card>
+      ) : null}
       <div className="grid gap-4 lg:grid-cols-2">
         {ordering || expected?.length ? <Card title="Expected deliveries" padded={false}>
           {expected?.length ? (

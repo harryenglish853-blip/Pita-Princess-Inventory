@@ -15,6 +15,7 @@ export default async function AdminPage() {
     { href: "/inventory/categories", label: "Categories & units", desc: "Corporate category tree and units of measure", show: true },
     { href: "/inventory/storage", label: "Storage areas", desc: "Storage areas and shelf-to-sheet walking order", show: can(ctx, "inventory.view") },
     { href: "/vendors", label: "Vendors & order guides", desc: "Vendor master and contract pricing", show: can(ctx, "orders.view") },
+    { href: "/admin/email", label: "Email reports & alerts", desc: "Who receives daily, weekly and monthly reports and alerts; preview every email", show: canOrg(ctx, "settings.manage") },
     { href: "/admin/audit", label: "Audit log", desc: "Who changed what, when, from which device", show: can(ctx, "audit.view") || canOrg(ctx, "audit.view") },
   ].filter((l) => l.show);
   return (

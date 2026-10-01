@@ -129,6 +129,9 @@ begin
   select id into v_id2 from public.email_outbox where status = 'sending' limit 1;
   perform public.complete_email(v_id2, false, 'timeout', null);
   perform tests.assert((select status from public.email_outbox where id = v_id2) = 'pending', 'a failed send goes back to pending for retry');
+  select id into v_id2 from public.email_outbox where status = 'sending' limit 1;
+  perform public.complete_email(v_id2, false, '422 validation_error invalid to address', null, true);
+  perform tests.assert((select status from public.email_outbox where id = v_id2) = 'failed', 'a permanent rejection fails at once (no retry storm)');
   v := public.run_email_schedule();
   v := public.run_email_schedule();
   perform tests.assert((v ->> 'queued')::int = 0, 'running the schedule again queues nothing new');
