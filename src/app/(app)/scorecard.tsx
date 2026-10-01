@@ -10,7 +10,7 @@ type Row = { location_id: string; code: string; name: string; region: string | n
 /** Corporate view: which locations are performing, which have problems, and why (trailing 28 days). */
 export async function Scorecard({ organizationId, region, district, market }: { organizationId: string; region?: string; district?: string; market?: string }) {
   const supabase = await createClient();
-  const { data } = await supabase.rpc("location_scorecard", { p_org: organizationId, p_days: 28 });
+  const { data } = await supabase.rpc("get_location_scorecard", { p_org: organizationId, p_days: 28 });
   const all = (data ?? []) as Row[];
   const rows = all.filter((r) => (!region || r.region === region) && (!district || r.district === district) && (!market || r.market === market));
   const opts = (k: "region" | "district" | "market") => Array.from(new Set(all.map((r) => r[k]).filter(Boolean))) as string[];

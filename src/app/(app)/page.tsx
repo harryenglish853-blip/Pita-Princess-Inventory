@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { requireContext, can, orderingEnabled } from "@/lib/session";
+import { requireContext, can, orderingEnabled, isEmployeeMode } from "@/lib/session";
+import { EmployeeHome } from "./employee-home";
 import { createClient } from "@/lib/supabase/server";
 import { ActionButton } from "@/components/client";
 import { Badge, Card, LinkButton, Notice, PageHeader, Stat } from "@/components/ui";
@@ -17,10 +18,14 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const sp = await searchParams;
   const ctx = await requireContext();
   const supabase = await createClient();
+  if (isEmployeeMode(ctx)) {
+    const { data } = await supabase.rpc("get_dashboard", { p_location: ctx.location.id });
+    return <EmployeeHome ctx={ctx} dash={data as never} />;
+  }
   // Operational alerts (late deliveries, unsubmitted orders, expiring lots, waste, variance) refresh before KPIs read them
   await supabase.rpc("refresh_operational_alerts", { p_location: ctx.location.id });
   const [{ data, error }, { data: setup }] = await Promise.all([
-    supabase.rpc("dashboard_kpis", { p_location: ctx.location.id }),
+    supabase.rpc("get_dashboard", { p_location: ctx.location.id }),
     supabase.rpc("setup_status", { p_location: ctx.location.id }),
   ]);
   const setupTodo = setup && can(ctx, "inventory.settings") ? setupSteps(setup as SetupStatus).filter((s) => !s.later) : [];

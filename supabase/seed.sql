@@ -7,6 +7,8 @@
 --   owner@example.com (System Owner)       gm@example.com (General Manager #101)
 --   kitchen@example.com (Kitchen Manager)  maria@example.com / john@example.com / carlos@example.com (Employees)
 --   accounting@example.com (Accounting)    regional@example.com (Regional Manager)
+--   owner2@example.com (second System Owner)
+--   employee@example.com (SHARED employee login: pick John 2580, Maria 3691, Carlos 4826 or Alex 5937)
 -- Do NOT run this against a production database.
 -- =====================================================================
 create extension if not exists pgcrypto with schema extensions;
@@ -114,6 +116,8 @@ declare
   v_carlos uuid := seed.user('carlos@example.com', 'Carlos Ruiz');
   v_acct uuid := seed.user('accounting@example.com', 'Alex Accounting');
   v_reg uuid := seed.user('regional@example.com', 'Rita Regional');
+  v_owner2 uuid := seed.user('owner2@example.com', 'Olivia Owner');
+  v_shared uuid := seed.user('employee@example.com', 'Employee Login (shared)');
   v_org uuid; v_loc uuid; v_loc2 uuid; v_region uuid; v_district uuid;
   p record; v record; s record;
   v_cat_top uuid; v_cat uuid; v_pid uuid; v_vendor uuid; v_storage uuid;
@@ -143,7 +147,15 @@ begin
   perform public.assign_role(v_org, v_carlos, 'employee', 'location', v_loc);
   perform public.assign_role(v_org, v_acct, 'accounting', 'organization', v_org);
   perform public.assign_role(v_org, v_reg, 'regional_manager', 'region', v_region);
-  update public.profiles set default_location_id = v_loc where id in (v_gm, v_km, v_maria, v_john, v_carlos, v_acct, v_reg);
+  perform public.assign_role(v_org, v_owner2, 'system_owner', 'organization', v_org);
+  perform public.assign_role(v_org, v_shared, 'employee', 'location', v_loc);
+  perform public.set_shared_login(v_org, v_shared, true);
+  -- "Who are you?" names on the shared employee login (demo PINs)
+  perform public.save_employee(v_org, null, 'John', v_loc, '2580', true);
+  perform public.save_employee(v_org, null, 'Maria', v_loc, '3691', true);
+  perform public.save_employee(v_org, null, 'Carlos', v_loc, '4826', true);
+  perform public.save_employee(v_org, null, 'Alex', v_loc, '5937', true);
+  update public.profiles set default_location_id = v_loc where id in (v_gm, v_km, v_maria, v_john, v_carlos, v_acct, v_reg, v_owner2, v_shared);
 
   -- ---------------------------------------------------------------- vendors
   insert into public.vendors (organization_id, name, vendor_number, account_number, sales_rep, phone, email, ordering_email, edi_enabled, einvoice_enabled,

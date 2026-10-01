@@ -123,3 +123,35 @@ export async function resetUserPassword(userId: string, password: string | undef
   if (e2) return fail(e2);
   return ok("Temporary password set. Share it in person; they can change it under My account.");
 }
+
+// ---------------------------------------------------------------- Employees (shared login name + PIN)
+export async function saveEmployee(id: string | null, _: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await requireContext();
+  const pin = str(fd, "pin");
+  if (pin && !/^[0-9]{4}$/.test(pin)) return fail({ message: "The PIN must be exactly 4 digits" });
+  if (!id && !pin) return fail({ message: "Set a 4-digit PIN" });
+  if (pin && pin !== str(fd, "pin_confirm")) return fail({ message: "The two PINs do not match" });
+  const location = str(fd, "location_id");
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("save_employee", {
+    p_org: ctx.organizationId, p_id: id, p_name: str(fd, "display_name"), p_location: location || null,
+    p_pin: pin || null, p_active: id ? fd.get("active") === "on" : true,
+  });
+  if (error) return fail(error);
+  return ok(id ? "Employee updated" : "Employee added");
+}
+
+export async function unlockEmployee(id: string): Promise<ActionState> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("unlock_employee", { p_employee: id });
+  if (error) return fail(error);
+  return ok("Unlocked");
+}
+
+export async function setSharedLogin(userId: string, shared: boolean): Promise<ActionState> {
+  const ctx = await requireContext();
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_shared_login", { p_org: ctx.organizationId, p_user: userId, p_shared: shared });
+  if (error) return fail(error);
+  return ok(shared ? "Shared login: people now pick their name and enter a PIN" : "Login is personal again");
+}

@@ -14,9 +14,9 @@ export default async function RecipePage({ params }: { params: Promise<{ id: str
   const supabase = await createClient();
   const [{ data: recipe }, { data: breakdown }, { data: ings }, { data: unitCost }, { data: units }, { data: products }, { data: allRecipes }, { data: options }, { data: usedIn }, { data: menu }] = await Promise.all([
     supabase.from("recipes").select("*, unit:units(code)").eq("id", id).single(),
-    supabase.rpc("recipe_cost_breakdown", { p_recipe: id, p_location: ctx.location.id }),
+    supabase.rpc("get_recipe_cost_breakdown", { p_recipe: id, p_location: ctx.location.id }),
     supabase.from("recipe_ingredients").select("id, product_id, sub_recipe_id, quantity, unit_id, yield_pct").eq("recipe_id", id).order("sort").order("created_at"),
-    supabase.rpc("recipe_unit_cost", { p_recipe: id, p_location: ctx.location.id }),
+    supabase.rpc("get_recipe_unit_cost", { p_recipe: id, p_location: ctx.location.id }),
     supabase.from("units").select("id, code, name, dimension").eq("active", true).order("sort"),
     supabase.from("products").select("id, name, is_prepped").eq("active", true).order("name"),
     supabase.from("recipes").select("id, name, yield_unit_id").eq("active", true).neq("id", id).order("name"),

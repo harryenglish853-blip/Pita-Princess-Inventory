@@ -17,11 +17,20 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
   const ctx = await requireContext();
   const supabase = await createClient();
   const page = Math.max(0, Number(sp.page ?? 0));
-  let q = supabase.from("audit_logs").select("id, created_at, action, entity_type, entity_id, summary, old_value, new_value, device_id, user_agent, ip_address, location_id, user:profiles(full_name)")
+  let q = supabase.from("audit_logs").select("id, created_at, action, entity_type, entity_id, summary, old_value, new_value, device_id, user_agent, ip_address, location_id, employee_id, user_id")
     .order("id", { ascending: false }).range(page * 100, page * 100 + 99);
   if (sp.entity) q = q.eq("entity_type", sp.entity);
   if (sp.q) q = q.or(`summary.ilike.%${sp.q.replace(/[%,()]/g, "")}%,entity_id.eq.${/^[0-9a-f-]{36}$/.test(sp.q) ? sp.q : "00000000-0000-0000-0000-000000000000"}`);
   const { data, error } = await q;
+  const empIds = Array.from(new Set((data ?? []).map((a) => a.employee_id).filter(Boolean))) as string[];
+  const userIds = Array.from(new Set((data ?? []).map((a) => a.user_id).filter(Boolean))) as string[];
+  // audit_logs.user_id is deliberately not a foreign key (entries outlive users), so names are looked up separately
+  const [{ data: emps }, { data: users }] = await Promise.all([
+    empIds.length ? supabase.rpc("employee_names", { p_ids: empIds }) : Promise.resolve({ data: [] }),
+    userIds.length ? supabase.from("profiles").select("id, full_name, email").in("id", userIds) : Promise.resolve({ data: [] }),
+  ]);
+  const userName = new Map(((users ?? []) as { id: string; full_name: string | null; email: string | null }[]).map((u) => [u.id, u.full_name ?? u.email ?? "Unknown user"]));
+  const empName = new Map(((emps ?? []) as { id: string; display_name: string }[]).map((e) => [e.id, e.display_name]));
   const locName = (id: string | null) => { const l = ctx.locations.find((x) => x.id === id); return l ? `#${l.code}` : "—"; };
   return (
     <>
@@ -30,11 +39,11 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
         <Input name="q" defaultValue={sp.q} placeholder="Search summary…" className="max-w-xs" />
         <Select name="entity" defaultValue={sp.entity ?? ""} className="max-w-xs">
           <option value="">All records</option>
-          {["products", "product_units", "location_products", "vendors", "vendor_products", "purchase_orders", "purchase_order_items", "receipts", "receipt_items", "count_session", "count_entry", "inventory", "user", "storage_locations", "storage_location", "categories"].map((e) => <option key={e}>{e}</option>)}
+          {["products", "product_units", "location_products", "vendors", "vendor_products", "purchase_orders", "purchase_order_items", "receipts", "receipt_items", "count_session", "count_entry", "inventory", "user", "storage_locations", "storage_location", "categories", "employee", "commissary_order", "toast_order", "email"].map((e) => <option key={e}>{e}</option>)}
         </Select>
         <button className="h-10 rounded-md border border-border-strong px-4 text-sm">Filter</button>
       </form>
-      {error ? <p className="text-danger">{error.message}</p> : null}
+      {error ? <p role="alert" className="text-danger">{error.message}</p> : null}
       <Card padded={false}>
         <div className="overflow-x-auto">
           <table className="tbl">
@@ -43,7 +52,10 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
               {(data ?? []).map((a) => (
                 <tr key={a.id} className="align-top">
                   <td className="whitespace-nowrap">{dateTimeFmt(a.created_at)}</td>
-                  <td>{(a.user as unknown as { full_name: string } | null)?.full_name ?? "System"}</td>
+                  <td>
+                    {a.employee_id && empName.get(a.employee_id) ? <div className="font-medium">{empName.get(a.employee_id)}</div> : null}
+                    <div className={a.employee_id ? "text-xs text-muted" : ""}>{a.user_id ? userName.get(a.user_id) ?? "Former user" : "System"}</div>
+                  </td>
                   <td>{locName(a.location_id)}</td>
                   <td><div className="font-medium">{a.action} · {a.entity_type}</div><div className="text-xs text-muted">{a.summary}</div></td>
                   <td className="max-w-md text-xs"><ul>{diff(a.old_value, a.new_value)?.map((d, i) => <li key={i} className="truncate font-mono" title={d}>{d}</li>)}</ul></td>

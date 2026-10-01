@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ActionButton, ActionForm, ModalButton, SubmitButton } from "@/components/client";
 import { Badge, Card, Field, Input, PageHeader, Select } from "@/components/ui";
 import { ROLE_OPTIONS } from "@/lib/permissions";
-import { grantRole, inviteUser, resetUserPassword, revokeRole, setMemberActive } from "../actions";
+import { grantRole, inviteUser, resetUserPassword, revokeRole, setMemberActive, setSharedLogin } from "../actions";
 
 export const metadata = { title: "Users & permissions" };
 
@@ -60,7 +60,7 @@ export default async function UsersPage() {
           <table className="tbl">
             <thead><tr><th>Name</th><th>Email</th><th>Roles</th><th>Status</th><th /></tr></thead>
             <tbody>
-              {(users ?? []).map((u: { user_id: string; full_name: string; email: string; active: boolean; roles: Role[] }) => (
+              {(users ?? []).map((u: { user_id: string; full_name: string; email: string; active: boolean; roles: Role[]; shared_login: boolean }) => (
                 <tr key={u.user_id} className={!u.active ? "opacity-60" : ""}>
                   <td className="font-medium">{u.full_name}</td>
                   <td>{u.email}</td>
@@ -74,7 +74,7 @@ export default async function UsersPage() {
                       ))}
                     </div>
                   </td>
-                  <td>{u.active ? <Badge tone="success">Active</Badge> : <Badge tone="danger">Inactive</Badge>}</td>
+                  <td className="space-x-1">{u.active ? <Badge tone="success">Active</Badge> : <Badge tone="danger">Inactive</Badge>}{u.shared_login ? <Badge tone="info">Shared · name + PIN</Badge> : null}</td>
                   <td className="whitespace-nowrap text-right">
                     <ModalButton label="Grant role" title={`Grant a role to ${u.full_name}`} size="sm" variant="ghost">
                       <ActionForm action={grantRole.bind(null, u.user_id)} className="space-y-3">
@@ -86,6 +86,12 @@ export default async function UsersPage() {
                     {u.user_id !== ctx.user.id ? (
                       <ActionButton size="sm" variant="ghost" action={resetUserPassword.bind(null, u.user_id)} prompt={`New temporary password for ${u.full_name} (8+ characters)`} confirmLabel="Set password">
                         Reset password
+                      </ActionButton>
+                    ) : null}
+                    {u.user_id !== ctx.user.id && (u.shared_login || u.roles.every((r) => (r as Role & { rank: number }).rank <= 10)) ? (
+                      <ActionButton size="sm" variant="ghost" action={setSharedLogin.bind(null, u.user_id, !u.shared_login)}
+                        confirm={u.shared_login ? `Make ${u.full_name} a personal login again? It will no longer ask for a name and PIN.` : `Make ${u.full_name} a shared login? Everyone using it must pick their name and enter their PIN before doing anything.`}>
+                        {u.shared_login ? "Make personal" : "Make shared"}
                       </ActionButton>
                     ) : null}
                     {u.user_id !== ctx.user.id ? (

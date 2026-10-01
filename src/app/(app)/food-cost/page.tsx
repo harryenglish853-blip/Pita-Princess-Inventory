@@ -35,8 +35,8 @@ export default async function FoodCostPage({ searchParams }: { searchParams: Pro
   const group = GROUPS[sp.group ?? "food"] ? sp.group ?? "food" : "food";
   const view = sp.view ?? "summary";
   const [{ data: summary, error }, { data: avt }] = await Promise.all([
-    supabase.rpc("food_cost_summary", { p_location: ctx.location.id, p_from: fromC.count_at, p_to: toC.count_at, p_cost_groups: GROUPS[group] }),
-    supabase.rpc("avt_by_product", { p_location: ctx.location.id, p_from: fromC.count_at, p_to: toC.count_at }),
+    supabase.rpc("get_food_cost", { p_location: ctx.location.id, p_from: fromC.count_at, p_to: toC.count_at, p_cost_groups: GROUPS[group] }),
+    supabase.rpc("get_avt_by_product", { p_location: ctx.location.id, p_from: fromC.count_at, p_to: toC.count_at }),
   ]);
   if (error) return <Notice tone="danger">{error.message}</Notice>;
   const s = summary as Summary;

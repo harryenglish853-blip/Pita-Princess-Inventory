@@ -10,6 +10,7 @@ export default async function AdminPage() {
   const ctx = await requireContext();
   const links = [
     { href: "/admin/users", label: "Users & permissions", desc: "Add staff, assign roles by location, region or company", show: ctx.locations.some((l) => l.permissions.includes("users.manage")) },
+    { href: "/admin/employees", label: "Employees & PINs", desc: "Names and 4-digit PINs for the shared employee login", show: ctx.locations.some((l) => l.permissions.includes("users.manage")) },
     { href: "/admin/locations", label: "Locations & hierarchy", desc: "Restaurants, regions, districts, operating tolerances", show: canOrg(ctx, "locations.manage") || can(ctx, "settings.manage") },
     { href: "/inventory/categories", label: "Categories & units", desc: "Corporate category tree and units of measure", show: true },
     { href: "/inventory/storage", label: "Storage areas", desc: "Storage areas and shelf-to-sheet walking order", show: can(ctx, "inventory.view") },

@@ -68,7 +68,7 @@ begin
   end;
 
   -- Nested cost: sandwich = 0.5 LB chicken (standard cost 0 until received) + bun 0.30 + 1/16 LB mayo @2.00 = 0.425
-  v_cost1 := public.recipe_unit_cost(r_sandwich, v_loc);
+  v_cost1 := public.get_recipe_unit_cost(r_sandwich, v_loc);
   perform tests.assert(v_cost1 = 0.425, format('sandwich cost before chicken receipt = 0.425 (got %s)', v_cost1));
   select sum(base_qty) into v_n from app.recipe_components(r_burger, 100, true) where product_id = beef;
   perform tests.assert(v_n = 50, '100 burgers x 8 OZ beef = 50 LB (theoretical usage)');
@@ -99,7 +99,7 @@ begin
   perform tests.assert((select status from public.purchase_orders where id = v_po) = 'back_ordered', 'PO back ordered');
 
   -- Nested cost update flows through: chicken now 3.20/LB -> sandwich 1.60 + 0.30 + 0.125
-  v_cost2 := public.recipe_unit_cost(r_sandwich, v_loc);
+  v_cost2 := public.get_recipe_unit_cost(r_sandwich, v_loc);
   perform tests.assert(v_cost2 = 2.025, format('sandwich cost after receipt = 2.025 (got %s)', v_cost2));
 
   -- Menu items
@@ -164,7 +164,7 @@ begin
   perform public.post_count_session(v_cnt, true);
 
   -- Actual vs theoretical for the week
-  v_res := public.food_cost_summary(v_loc, v_open_at, v_sun_at);
+  v_res := public.get_food_cost(v_loc, v_open_at, v_sun_at);
   perform tests.assert((v_res ->> 'net_sales')::numeric = 6260, 'net sales from POS');
   perform tests.assert(round((v_res ->> 'actual_cost')::numeric, 2) = round((v_res ->> 'pos_usage_at_post')::numeric + (v_res ->> 'waste')::numeric + (v_res ->> 'count_variance')::numeric
                         + (v_res ->> 'adjustments')::numeric + (v_res ->> 'production_net')::numeric, 2),
@@ -172,7 +172,7 @@ begin
   perform tests.assert((v_res ->> 'actual_cost')::numeric = (v_res ->> 'begin_inventory')::numeric + (v_res ->> 'purchases')::numeric + (v_res ->> 'transfers')::numeric - (v_res ->> 'end_inventory')::numeric,
                        'actual = begin + purchases + transfers - end');
   perform tests.assert((v_res ->> 'theoretical_cost')::numeric > 0 and (v_res ->> 'actual_pct') is not null, 'AvT percentages computed');
-  select * into r from public.avt_by_product(v_loc, v_open_at, v_sun_at) where product_id = chicken;
+  select * into r from public.get_avt_by_product(v_loc, v_open_at, v_sun_at) where product_id = chicken;
   perform tests.assert(r.begin_qty = 14 and r.received_qty = 160 and r.theoretical_qty = 140 and r.expected_end_qty = 31 and r.physical_end_qty = 26 and r.variance_qty = -5,
                        'product AvT: begin 14 + received 160 - theoretical 140 - waste 3 = expected 31; physical 26; variance -5');
 

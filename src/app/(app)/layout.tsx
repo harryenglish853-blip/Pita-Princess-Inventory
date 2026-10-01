@@ -1,16 +1,19 @@
 import Link from "next/link";
-import { requireContext, visibleNav } from "@/lib/session";
+import { isEmployeeMode, isSharedLogin, requireContext, visibleNav } from "@/lib/session";
 import { NAV } from "@/components/shell/nav-items";
 import { Sidebar, MobileNav } from "@/components/shell/sidebar";
 import { LocationSwitcher } from "@/components/shell/location-switcher";
 import { SyncIndicator } from "@/components/offline/sync-indicator";
 import { Icon } from "@/components/shell/icons";
 import { SignOutButton } from "@/components/shell/sign-out";
+import { SwitchPersonButton } from "@/components/shell/switch-person";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const ctx = await requireContext();
   const items = visibleNav(ctx, NAV);
   const org = ctx.organizations.find((o) => o.id === ctx.organizationId);
+  const shared = isSharedLogin(ctx);
+  const who = shared && ctx.employee ? ctx.employee.display_name : ctx.user.full_name ?? ctx.user.email;
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[15rem_1fr]">
       <aside className="no-print sticky top-0 hidden h-dvh overflow-y-auto border-r border-border bg-surface lg:block">
@@ -35,24 +38,27 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </label>
           </form>
           <span className="hidden sm:inline-flex"><SyncIndicator /></span>
+          {shared && ctx.employee ? (
+            <SwitchPersonButton name={ctx.employee.display_name} />
+          ) : null}
           <details className="relative">
             <summary className="grid h-9 w-9 cursor-pointer list-none place-items-center rounded-full bg-brand-soft text-sm font-semibold text-brand" aria-label="Account">
-              {(ctx.user.full_name ?? ctx.user.email).slice(0, 1).toUpperCase()}
+              {who.slice(0, 1).toUpperCase()}
             </summary>
             <div className="absolute right-0 z-30 mt-2 w-60 rounded-md border border-border bg-surface p-2 shadow-lg">
               <div className="px-2 py-1.5 text-sm">
-                <div className="font-medium">{ctx.user.full_name}</div>
-                <div className="truncate text-xs text-muted">{ctx.user.email}</div>
+                <div className="font-medium">{who}</div>
+                <div className="truncate text-xs text-muted">{shared ? `Shared login · ${ctx.user.email}` : ctx.user.email}</div>
                 <div className="mt-1 text-xs text-muted">{ctx.roles.map((r) => r.name).join(", ")}</div>
               </div>
-              <Link href="/account" className="block rounded px-2 py-1.5 text-sm hover:bg-surface-2">My account</Link>
+              {shared ? null : <Link href="/account" className="block rounded px-2 py-1.5 text-sm hover:bg-surface-2">My account</Link>}
               <SignOutButton />
             </div>
           </details>
         </header>
         <main className="mx-auto max-w-[1400px] px-3 pb-28 pt-4 sm:px-5 lg:pb-10">{children}</main>
       </div>
-      <MobileNav items={items} ordering={items.some((i) => i.href === "/purchasing")} />
+      <MobileNav items={items} mode={isEmployeeMode(ctx) ? "employee" : "management"} />
     </div>
   );
 }

@@ -36,25 +36,26 @@ export function Sidebar({ items }: { items: NavItem[] }) {
   );
 }
 
-export function MobileNav({ items, ordering }: { items: NavItem[]; ordering: boolean }) {
+type Tab = { href: string; label: string; icon: string; primary?: boolean };
+
+export function MobileNav({ items, mode }: { items: NavItem[]; mode: "employee" | "management" }) {
   const pathname = usePathname();
-  const tabs = ordering ? [
+  const has = (href: string) => items.some((i) => i.href === href);
+  const tabs: Tab[] = mode === "employee" ? [
     { href: "/", label: "Home", icon: "home" },
-    { href: "/counts", label: "Count", icon: "clipboard", primary: true },
-    { href: "/purchasing", label: "Order", icon: "cart" },
-    { href: "/receiving", label: "Receive", icon: "truck" },
-    { href: "/more", label: "More", icon: "menu" },
-  ] : [
-    // Orders are placed in the vendors' own apps; deliveries are recorded here
-    { href: "/", label: "Home", icon: "home" },
-    { href: "/receiving", label: "Receive", icon: "truck" },
-    { href: "/counts", label: "Count", icon: "clipboard", primary: true },
+    { href: "/receiving", label: "Receive", icon: "truck", primary: true },
     { href: "/waste", label: "Waste", icon: "trash" },
+    { href: "/tasks", label: "Tasks", icon: "bell" },
+  ] : ([
+    { href: "/", label: "Home", icon: "home" },
+    { href: "/inventory", label: "Inventory", icon: "boxes" },
+    { href: "/counts", label: "Count", icon: "clipboard", primary: true },
+    has("/ordering") ? { href: "/ordering", label: "Orders", icon: "cart" } : { href: "/receiving", label: "Receive", icon: "truck" },
     { href: "/more", label: "More", icon: "menu" },
-  ];
+  ] as Tab[]).filter((t) => t.href === "/" || t.href === "/more" || has(t.href));
   return (
     <nav aria-label="Primary" className="no-print fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface pb-[env(safe-area-inset-bottom)] lg:hidden">
-      <div className="grid grid-cols-5">
+      <div className="grid" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
         {tabs.map((t) => {
           const active = t.href === "/" ? pathname === "/" : pathname.startsWith(t.href);
           return (

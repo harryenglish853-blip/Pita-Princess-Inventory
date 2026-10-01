@@ -12,7 +12,7 @@ export default async function RecipesPage() {
     supabase.from("recipes").select("id, name, recipe_type, yield_qty, active, product_id, unit:units(code)").order("name"),
     supabase.from("menu_items").select("id, name, pos_item_id, selling_price, portion_qty, recipe_id, active"),
   ]);
-  const { data: costRows } = await supabase.rpc("recipe_costs", { p_location: ctx.location.id });
+  const { data: costRows } = await supabase.rpc("get_recipe_costs", { p_location: ctx.location.id });
   const costOf = new Map(((costRows ?? []) as { recipe_id: string; unit_cost: number }[]).map((c) => [c.recipe_id, Number(c.unit_cost)]));
   const showCost = can(ctx, "reports.view_cost");
   const rows = (recipes ?? []).map((r) => {

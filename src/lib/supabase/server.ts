@@ -3,6 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient as createPlainClient } from "@supabase/supabase-js";
 import { cookies, headers } from "next/headers";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "./env";
+import { EMPLOYEE_COOKIE, EMPLOYEE_HEADER } from "@/lib/employee-cookie";
 
 /** Supabase client bound to the signed-in user's session (RLS applies). */
 export async function createClient() {
@@ -15,6 +16,8 @@ export async function createClient() {
   if (ip) forwarded["x-forwarded-for"] = ip;
   const device = cookieStore.get("device_id")?.value;
   if (device) forwarded["x-device-id"] = device;
+  const employee = cookieStore.get(EMPLOYEE_COOKIE)?.value;
+  if (employee && /^[0-9a-f]{64}$/.test(employee)) forwarded[EMPLOYEE_HEADER] = employee;
 
   return createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     global: { headers: forwarded },

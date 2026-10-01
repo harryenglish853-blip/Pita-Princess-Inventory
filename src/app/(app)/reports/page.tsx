@@ -101,7 +101,7 @@ async function Report({ k, loc, from, to, q, type, showCost, tz }: { k: string; 
       );
     }
     case "efficiency": {
-      const { data, error } = await supabase.rpc("report_inventory_efficiency", { p_location: loc, p_days: 28 });
+      const { data, error } = await supabase.rpc("get_report_inventory_efficiency", { p_location: loc, p_days: 28 });
       if (error) return <Notice tone="danger">{error.message}</Notice>;
       return table(data ?? [], [
         { key: "product_name", label: "Product", href: "/inventory/items/{product_id}?tab=stock" }, { key: "category_name", label: "Category", filterable: true },
@@ -155,7 +155,7 @@ async function Report({ k, loc, from, to, q, type, showCost, tz }: { k: string; 
     }
     case "purchases":
     case "price-variance": {
-      const { data, error } = await supabase.rpc("report_purchases", { p_location: loc, p_from: from, p_to: to });
+      const { data, error } = await supabase.rpc("get_report_purchases", { p_location: loc, p_from: from, p_to: to });
       if (error) return <Notice tone="danger">{error.message}</Notice>;
       const rows = ((data ?? []) as Record<string, unknown>[]).filter((r) => k === "purchases" || Number(r.price_variance ?? 0) !== 0);
       return table(rows, [
@@ -186,7 +186,7 @@ async function Report({ k, loc, from, to, q, type, showCost, tz }: { k: string; 
       ], { sort: { key: "change_pct", dir: -1 } });
     }
     case "vendors": {
-      const { data, error } = await supabase.rpc("report_vendor_performance", { p_location: loc, p_from: from, p_to: to });
+      const { data, error } = await supabase.rpc("get_report_vendor_performance", { p_location: loc, p_from: from, p_to: to });
       if (error) return <Notice tone="danger">{error.message}</Notice>;
       return table(data ?? [], [
         { key: "vendor_name", label: "Vendor" }, { key: "receipts", label: "Deliveries", format: "number" }, { key: "lines", label: "Lines", format: "number" },
@@ -197,7 +197,7 @@ async function Report({ k, loc, from, to, q, type, showCost, tz }: { k: string; 
       ]);
     }
     case "order-accuracy": {
-      const { data, error } = await supabase.rpc("report_order_accuracy", { p_location: loc, p_from: from, p_to: to });
+      const { data, error } = await supabase.rpc("get_report_order_accuracy", { p_location: loc, p_from: from, p_to: to });
       if (error) return <Notice tone="danger">{error.message}</Notice>;
       return table(data ?? [], [
         { key: "po_number", label: "PO", href: "/purchasing/{po_id}" }, { key: "vendor_name", label: "Vendor", filterable: true }, { key: "delivery_date", label: "Delivery", format: "date" },
