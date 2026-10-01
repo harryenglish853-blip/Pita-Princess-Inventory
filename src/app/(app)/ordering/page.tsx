@@ -13,7 +13,7 @@ import { deadlineLabel, deliveryLabel, loadSchedule, safeWebsite, timeLeft, type
 export const metadata = { title: "Ordering center" };
 
 export default async function OrderingCenter() {
-  const ctx = await requirePermission("orders.view");
+  const ctx = await requirePermission("orders.create");
   const supabase = await createClient();
   const { vendors, error } = await loadSchedule(ctx.location.id);
   // dynamic pars follow the latest forecast before anything is suggested

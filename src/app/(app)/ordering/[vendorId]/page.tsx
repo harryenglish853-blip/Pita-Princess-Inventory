@@ -10,7 +10,7 @@ export const metadata = { title: "Suggested order" };
 
 export default async function VendorOrderPage({ params }: { params: Promise<{ vendorId: string }> }) {
   const { vendorId } = await params;
-  const ctx = await requirePermission("orders.view");
+  const ctx = await requirePermission("orders.create");
   const { vendors } = await loadSchedule(ctx.location.id);
   const v = vendors.find((x) => x.vendor_id === vendorId);
   if (!v || v.kind === "commissary") notFound();

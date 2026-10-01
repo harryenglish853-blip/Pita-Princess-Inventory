@@ -16,11 +16,19 @@ test("wrong password shows an error", async ({ page }) => {
 
 test("employee sees operational actions only", async ({ browser }) => {
   const { page, errors } = await newSession(browser, "maria@example.com");
-  await expect(page.getByRole("link", { name: "Count inventory" })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Food Cost (AvT)" })).toHaveCount(0);
+  // the employee home is four big buttons, no analytics
+  await expect(page.getByTestId("employee-home")).toBeVisible();
+  for (const label of ["Receive delivery", "Log waste", "Transfer product", "My tasks"]) await expect(page.getByTestId("employee-home").getByText(label)).toBeVisible();
+  await expect(page.getByText("Inventory value")).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Food Cost" })).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Ordering" })).toHaveCount(0);
   await page.goto("/admin/users");
   await expect(page).toHaveURL(/\/denied/);
   await page.goto("/food-cost");
+  await expect(page).toHaveURL(/\/denied/);
+  await page.goto("/admin/email");
+  await expect(page).toHaveURL(/\/denied/);
+  await page.goto("/ordering");
   await expect(page).toHaveURL(/\/denied/);
   expect(errors).toEqual([]);
 });
