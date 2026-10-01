@@ -18,5 +18,6 @@ export const NAV: NavItem[] = [
   { href: "/sales", label: "Sales / POS", icon: "receipt", perm: "sales.import", section: "Kitchen" },
   { href: "/food-cost", label: "Food Cost (AvT)", icon: "percent", perm: "reports.view_cost", section: "Analysis" },
   { href: "/reports", label: "Reports", icon: "chart", perm: "reports.view", section: "Analysis" },
+  { href: "/setup", label: "Getting started", icon: "clipboard", perm: "inventory.settings", section: "Admin" },
   { href: "/admin", label: "Administration", icon: "settings", section: "Admin" },
 ];

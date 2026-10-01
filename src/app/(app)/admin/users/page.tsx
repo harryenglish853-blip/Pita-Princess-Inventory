@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ActionButton, ActionForm, ModalButton, SubmitButton } from "@/components/client";
 import { Badge, Card, Field, Input, PageHeader, Select } from "@/components/ui";
 import { ROLE_OPTIONS } from "@/lib/permissions";
-import { grantRole, inviteUser, revokeRole, setMemberActive } from "../actions";
+import { grantRole, inviteUser, resetUserPassword, revokeRole, setMemberActive } from "../actions";
 
 export const metadata = { title: "Users & permissions" };
 
@@ -83,6 +83,11 @@ export default async function UsersPage() {
                         <div className="flex justify-end"><SubmitButton>Grant</SubmitButton></div>
                       </ActionForm>
                     </ModalButton>
+                    {u.user_id !== ctx.user.id ? (
+                      <ActionButton size="sm" variant="ghost" action={resetUserPassword.bind(null, u.user_id)} prompt={`New temporary password for ${u.full_name} (8+ characters)`} confirmLabel="Set password">
+                        Reset password
+                      </ActionButton>
+                    ) : null}
                     {u.user_id !== ctx.user.id ? (
                       <ActionButton size="sm" variant="ghost" action={setMemberActive.bind(null, u.user_id, !u.active)} confirm={u.active ? `Deactivate ${u.full_name}? They immediately lose access to this organization.` : undefined}>
                         {u.active ? "Deactivate" : "Reactivate"}

@@ -250,3 +250,20 @@ export async function saveUnit(_: ActionState, fd: FormData): Promise<ActionStat
   if (error) return fail(error);
   return ok("Unit added");
 }
+
+export type ImportReport = {
+  applied: boolean;
+  summary: { create: number; update: number; skip: number; categories: string[]; vendors: string[]; storage_areas: string[] };
+  rows: { row: number; name: string; item_number?: string; action: "create" | "update" | "skip"; errors: string[]; warnings: string[] }[];
+};
+
+/** Preview (apply = false, nothing saved) or import a product spreadsheet. One database call either way. */
+export async function importProducts(rows: Record<string, string>[], apply: boolean): Promise<ActionState<ImportReport>> {
+  const ctx = await requireContext();
+  if (!rows.length) return fail({ message: "The sheet has no item rows under the header row." });
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("import_products", { p_location: ctx.location.id, p_rows: rows, p_apply: apply });
+  if (error) return fail(error);
+  const r = data as ImportReport;
+  return ok(apply ? `Imported: ${r.summary.create} new, ${r.summary.update} updated${r.summary.skip ? `, ${r.summary.skip} skipped` : ""}` : "Preview ready", r);
+}

@@ -67,6 +67,10 @@ scripts/local-stack/     Docker-free Supabase-compatible stack for dev/CI
 
 By default the app does **not** place orders: you order in each vendor's own app and log the delivery here (Receiving → **Log a delivery** → pick the vendor → scan the invoice or tick the items that arrived → enter quantities and prices → post). Stock, average cost and price history update when the delivery is posted. Suggested orders and purchase orders can be switched on in **Administration → How you order** (organization setting `ordering_enabled`).
 
+## Going live
+
+See **[DEPLOY.md](DEPLOY.md)**: create the Supabase project, paste `supabase/production/setup.sql` (no demo data), deploy on Vercel, create the owner account, then follow **Getting started** inside the app (product spreadsheet import, shelf order, team, first count).
+
 ## Running locally
 
 ### Option A — Supabase CLI (Docker)

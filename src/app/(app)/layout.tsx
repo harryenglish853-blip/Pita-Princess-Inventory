@@ -45,6 +45,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 <div className="truncate text-xs text-muted">{ctx.user.email}</div>
                 <div className="mt-1 text-xs text-muted">{ctx.roles.map((r) => r.name).join(", ")}</div>
               </div>
+              <Link href="/account" className="block rounded px-2 py-1.5 text-sm hover:bg-surface-2">My account</Link>
               <SignOutButton />
             </div>
           </details>

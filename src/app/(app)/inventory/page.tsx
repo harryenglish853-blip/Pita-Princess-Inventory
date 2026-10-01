@@ -45,6 +45,7 @@ export default async function InventoryPage() {
         actions={
           <>
             {canOrg(ctx, "products.edit") ? <LinkButton href="/inventory/items/new" variant="primary">New product</LinkButton> : null}
+            {canOrg(ctx, "products.edit") && can(ctx, "inventory.settings") ? <LinkButton href="/inventory/import">Import from spreadsheet</LinkButton> : null}
             <LinkButton href="/inventory/categories">Categories & units</LinkButton>
             <LinkButton href="/inventory/storage">Storage & shelf order</LinkButton>
           </>

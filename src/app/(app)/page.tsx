@@ -7,6 +7,7 @@ import { dateFmt, money, pct, qty } from "@/lib/format";
 import { Boxes, ClipboardList, Trash2, Truck, ShoppingCart } from "lucide-react";
 import { ackAlert } from "./tasks/actions";
 import { Scorecard } from "./scorecard";
+import { setupSteps, type SetupStatus } from "@/lib/setup";
 
 export const metadata = { title: "Overview" };
 
@@ -18,7 +19,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const supabase = await createClient();
   // Operational alerts (late deliveries, unsubmitted orders, expiring lots, waste, variance) refresh before KPIs read them
   await supabase.rpc("refresh_operational_alerts", { p_location: ctx.location.id });
-  const { data, error } = await supabase.rpc("dashboard_kpis", { p_location: ctx.location.id });
+  const [{ data, error }, { data: setup }] = await Promise.all([
+    supabase.rpc("dashboard_kpis", { p_location: ctx.location.id }),
+    supabase.rpc("setup_status", { p_location: ctx.location.id }),
+  ]);
+  const setupTodo = setup && can(ctx, "inventory.settings") ? setupSteps(setup as SetupStatus).filter((s) => !s.later) : [];
+  const setupDone = setupTodo.filter((s) => s.done).length;
   if (error) return <Notice tone="danger" title="Dashboard unavailable">{error.message}</Notice>;
   const k = data as K;
   const cost = can(ctx, "reports.view_cost");
@@ -35,6 +41,13 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     <>
       <PageHeader title={`${greet}, ${(ctx.user.full_name ?? "").split(" ")[0]}`} subtitle={`#${ctx.location.code} ${ctx.location.name} · ${dateFmt(k.today)}`} />
 
+      {setupTodo.length && setupDone < setupTodo.length ? (
+        <Link href="/setup" className="mb-5 flex items-center justify-between gap-3 rounded-lg border border-brand bg-brand-soft px-4 py-3" data-testid="setup-banner">
+          <div><div className="font-semibold text-brand">Finish setting up · {setupDone} of {setupTodo.length} done</div>
+            <div className="text-sm text-muted">Next: {setupTodo.find((s) => !s.done)!.title}</div></div>
+          <span className="text-sm font-medium text-brand">Continue →</span>
+        </Link>
+      ) : null}
       <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {can(ctx, "inventory.count") ? <QuickAction href="/counts" icon={<ClipboardList className="h-6 w-6" />} label="Count inventory" sub={k.open_counts ? `${k.open_counts} open` : undefined} /> : null}
         {can(ctx, "orders.receive") ? <QuickAction href="/receiving" icon={<Truck className="h-6 w-6" />} label={ordering ? "Receive delivery" : "Log a delivery"} sub={ordering && k.pending_deliveries ? `${k.pending_deliveries} expected` : undefined} /> : null}

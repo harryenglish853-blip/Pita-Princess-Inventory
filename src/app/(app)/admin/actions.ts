@@ -110,3 +110,16 @@ export async function setOrderingEnabled(enabled: boolean): Promise<ActionState>
   if (error) return fail(error);
   return ok(enabled ? "Ordering turned on" : "Ordering turned off: deliveries are logged from invoices");
 }
+
+/** Sets a temporary password for someone below you (the database checks rank and audits it). */
+export async function resetUserPassword(userId: string, password: string | undefined): Promise<ActionState> {
+  const ctx = await requireContext();
+  const pw = (password ?? "").trim();
+  if (pw.length < 8) return fail({ message: "Use at least 8 characters for the temporary password." });
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("authorize_password_reset", { p_org: ctx.organizationId, p_user: userId });
+  if (error) return fail(error);
+  const { error: e2 } = await createAdminClient().auth.admin.updateUserById(userId, { password: pw });
+  if (e2) return fail(e2);
+  return ok("Temporary password set. Share it in person; they can change it under My account.");
+}
